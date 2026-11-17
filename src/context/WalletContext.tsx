@@ -7,6 +7,7 @@ import {
   CategorySpendSummary,
   ActiveTab,
   QuickAddPayload,
+  Attachment,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
@@ -27,15 +28,21 @@ interface WalletContextType {
   isQuickAddOpen: boolean;
   quickAddInitialMode: 'income' | 'expense' | 'credit' | 'debt';
   isSupabaseMode: boolean;
+  selectedRecord: (Transaction | CreditDebtRecord) | null;
+  selectedRecordKind: 'transaction' | 'credit-debt';
 
   // Actions
   setActiveTab: (tab: ActiveTab) => void;
   openQuickAdd: (mode?: 'income' | 'expense' | 'credit' | 'debt') => void;
   closeQuickAdd: () => void;
+  openRecordDetails: (record: Transaction | CreditDebtRecord, kind: 'transaction' | 'credit-debt') => void;
+  closeRecordDetails: () => void;
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => void;
   deleteTransaction: (id: string) => void;
+  updateTransactionAttachments: (id: string, attachments: Attachment[]) => void;
   addCreditDebt: (data: Omit<CreditDebtRecord, 'id' | 'remainingAmount' | 'createdAt' | 'updatedAt'>) => void;
-  settleCreditDebt: (id: string, amount: number) => void;
+  settleCreditDebt: (id: string, amount: number, attachments?: Attachment[]) => void;
+  updateCreditDebtAttachments: (id: string, attachments: Attachment[]) => void;
   deleteCreditDebt: (id: string) => void;
   quickAdd: (payload: QuickAddPayload) => void;
   resetToDefaults: () => void;
@@ -109,6 +116,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [quickAddInitialMode, setQuickAddInitialMode] = useState<'income' | 'expense' | 'credit' | 'debt'>('expense');
+  const [selectedRecord, setSelectedRecord] = useState<(Transaction | CreditDebtRecord) | null>(null);
+  const [selectedRecordKind, setSelectedRecordKind] = useState<'transaction' | 'credit-debt'>('transaction');
 
   const isSupabaseMode = isSupabaseConfigured();
 
@@ -261,7 +270,30 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCreditDebtRecords((prev) => [newRecord, ...prev]);
   }, []);
 
-  const settleCreditDebt = useCallback((id: string, amount: number) => {
+  const openRecordDetails = useCallback((record: Transaction | CreditDebtRecord, kind: 'transaction' | 'credit-debt') => {
+    setSelectedRecord(record);
+    setSelectedRecordKind(kind);
+  }, []);
+
+  const closeRecordDetails = useCallback(() => {
+    setSelectedRecord(null);
+  }, []);
+
+  const updateTransactionAttachments = useCallback((id: string, newAttachments: Attachment[]) => {
+    setTransactions((prev) =>
+      prev.map((tx) => (tx.id === id ? { ...tx, attachments: newAttachments, updatedAt: new Date().toISOString() } : tx))
+    );
+    setSelectedRecord((prev) => (prev && prev.id === id ? { ...prev, attachments: newAttachments } : prev));
+  }, []);
+
+  const updateCreditDebtAttachments = useCallback((id: string, newAttachments: Attachment[]) => {
+    setCreditDebtRecords((prev) =>
+      prev.map((rec) => (rec.id === id ? { ...rec, attachments: newAttachments, updatedAt: new Date().toISOString() } : rec))
+    );
+    setSelectedRecord((prev) => (prev && prev.id === id ? { ...prev, attachments: newAttachments } : prev));
+  }, []);
+
+  const settleCreditDebt = useCallback((id: string, amount: number, settlementAttachments?: Attachment[]) => {
     setCreditDebtRecords((prev) =>
       prev.map((record) => {
         if (record.id !== id) return record;
@@ -279,11 +311,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           newStatus = 'partial';
         }
 
+        const combinedAttachments = settlementAttachments && settlementAttachments.length > 0
+          ? [...(record.attachments || []), ...settlementAttachments]
+          : record.attachments;
+
         return {
           ...record,
           settledAmount: newSettled,
           remainingAmount: remaining,
           status: newStatus,
+          attachments: combinedAttachments,
           updatedAt: new Date().toISOString(),
         };
       })
@@ -292,7 +329,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const deleteCreditDebt = useCallback((id: string) => {
     setCreditDebtRecords((prev) => prev.filter((r) => r.id !== id));
-  }, []);
+    if (selectedRecord && selectedRecord.id === id) {
+      setSelectedRecord(null);
+    }
+  }, [selectedRecord]);
 
   const quickAdd = useCallback((payload: QuickAddPayload) => {
     if (payload.mode === 'income' || payload.mode === 'expense') {
@@ -304,6 +344,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         title: payload.title,
         description: payload.description,
         transactionDate: payload.date,
+        attachments: payload.attachments,
       });
     } else {
       addCreditDebt({
@@ -315,6 +356,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         status: 'pending',
         dueDate: payload.dueDate,
         notes: payload.description,
+        attachments: payload.attachments,
       });
     }
     setIsQuickAddOpen(false);
@@ -323,6 +365,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const resetToDefaults = useCallback(() => {
     setTransactions(INITIAL_TRANSACTIONS);
     setCreditDebtRecords(INITIAL_CREDIT_DEBT);
+    setSelectedRecord(null);
     localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
     localStorage.removeItem(STORAGE_KEYS.CREDIT_DEBT);
   }, []);
@@ -339,13 +382,19 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isQuickAddOpen,
         quickAddInitialMode,
         isSupabaseMode,
+        selectedRecord,
+        selectedRecordKind,
         setActiveTab,
         openQuickAdd,
         closeQuickAdd,
+        openRecordDetails,
+        closeRecordDetails,
         addTransaction,
         deleteTransaction,
+        updateTransactionAttachments,
         addCreditDebt,
         settleCreditDebt,
+        updateCreditDebtAttachments,
         deleteCreditDebt,
         quickAdd,
         resetToDefaults,

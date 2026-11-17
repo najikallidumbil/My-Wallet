@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '../../context/WalletContext';
-import { PaymentMethod, QuickAddPayload } from '../../types';
-import { X, ArrowDownRight, ArrowUpRight, HandCoins, Landmark, Upload, Paperclip } from 'lucide-react';
+import { PaymentMethod, QuickAddPayload, Attachment } from '../../types';
+import { X, ArrowDownRight, ArrowUpRight, HandCoins, Landmark } from 'lucide-react';
 import { CURRENCY_SYMBOL } from '../../lib/currency';
+import { AttachmentUploader } from '../common/AttachmentUploader';
 
 export const QuickAddModal: React.FC = () => {
   const { isQuickAddOpen, closeQuickAdd, quickAddInitialMode, categories, quickAdd } = useWallet();
@@ -17,7 +18,7 @@ export const QuickAddModal: React.FC = () => {
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState<string>('');
   const [description, setDescription] = useState<string>('');
-  const [hasReceipt, setHasReceipt] = useState<boolean>(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Sync mode with trigger
@@ -31,7 +32,7 @@ export const QuickAddModal: React.FC = () => {
       setDescription('');
       setDate(new Date().toISOString().split('T')[0]);
       setDueDate('');
-      setHasReceipt(false);
+      setAttachments([]);
       setError(null);
     }
   }, [isQuickAddOpen, quickAddInitialMode]);
@@ -79,6 +80,7 @@ export const QuickAddModal: React.FC = () => {
       date,
       dueDate: (mode === 'credit' || mode === 'debt') ? (dueDate || undefined) : undefined,
       description: description.trim() || undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     quickAdd(payload);
@@ -323,30 +325,12 @@ export const QuickAddModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Attachment placeholder (Phase 3 Supabase Storage ready) */}
+          {/* Real Attachments Uploader */}
           <div className="pt-2">
-            <div
-              onClick={() => setHasReceipt(!hasReceipt)}
-              className={`p-3 rounded-xl border border-dashed cursor-pointer flex items-center justify-between text-xs transition-colors ${
-                hasReceipt
-                  ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-700 dark:text-brand-300'
-                  : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {hasReceipt ? (
-                  <Paperclip className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-                ) : (
-                  <Upload className="w-4 h-4" />
-                )}
-                <span>
-                  {hasReceipt ? 'Bill receipt attached (sample_bill.pdf)' : 'Attach Bill or Payment Screenshot'}
-                </span>
-              </div>
-              <span className="text-[10px] text-slate-400">
-                {hasReceipt ? 'Tap to remove' : 'Phase 3 Ready'}
-              </span>
-            </div>
+            <AttachmentUploader
+              attachments={attachments}
+              onChange={setAttachments}
+            />
           </div>
 
           {/* Action buttons */}

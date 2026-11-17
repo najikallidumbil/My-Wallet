@@ -8,9 +8,19 @@ import { CreditDebtView } from './views/CreditDebtView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { SettingsView } from './views/SettingsView';
 import { QuickAddModal } from './components/modals/QuickAddModal';
+import { RecordDetailsModal } from './components/modals/RecordDetailsModal';
 
 const AppContent: React.FC = () => {
-  const { activeTab } = useWallet();
+  const {
+    activeTab,
+    selectedRecord,
+    selectedRecordKind,
+    closeRecordDetails,
+    updateTransactionAttachments,
+    updateCreditDebtAttachments,
+    deleteTransaction,
+    deleteCreditDebt,
+  } = useWallet();
 
   const renderActiveView = () => {
     switch (activeTab) {
@@ -33,6 +43,26 @@ const AppContent: React.FC = () => {
     <AppLayout>
       {renderActiveView()}
       <QuickAddModal />
+      <RecordDetailsModal
+        record={selectedRecord}
+        recordKind={selectedRecordKind}
+        isOpen={Boolean(selectedRecord)}
+        onClose={closeRecordDetails}
+        onUpdateAttachments={(id, atts) => {
+          if (selectedRecordKind === 'transaction') {
+            updateTransactionAttachments(id, atts);
+          } else {
+            updateCreditDebtAttachments(id, atts);
+          }
+        }}
+        onDeleteRecord={(id) => {
+          if (selectedRecordKind === 'transaction') {
+            deleteTransaction(id);
+          } else {
+            deleteCreditDebt(id);
+          }
+        }}
+      />
     </AppLayout>
   );
 };

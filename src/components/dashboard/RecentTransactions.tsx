@@ -7,7 +7,7 @@ import { PaymentBadge } from '../common/PaymentBadge';
 import { ArrowRight, Paperclip, Trash2 } from 'lucide-react';
 
 export const RecentTransactions: React.FC = () => {
-  const { transactions, categories, deleteTransaction, setActiveTab } = useWallet();
+  const { transactions, categories, deleteTransaction, setActiveTab, openRecordDetails } = useWallet();
 
   const recentList = transactions.slice(0, 5);
 
@@ -51,7 +51,8 @@ export const RecentTransactions: React.FC = () => {
             return (
               <div
                 key={tx.id}
-                className="py-3 flex items-center justify-between gap-3 group hover:bg-slate-50/50 dark:hover:bg-slate-800/30 -mx-2 px-2 rounded-xl transition-colors"
+                onClick={() => openRecordDetails(tx, 'transaction')}
+                className="py-3 flex items-center justify-between gap-3 group hover:bg-slate-50/70 dark:hover:bg-slate-800/40 -mx-2 px-2 rounded-xl transition-colors cursor-pointer"
               >
                 {/* Left: Icon and info */}
                 <div className="flex items-center gap-3 min-w-0">
@@ -106,7 +107,10 @@ export const RecentTransactions: React.FC = () => {
                   </div>
 
                   <button
-                    onClick={() => deleteTransaction(tx.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteTransaction(tx.id);
+                    }}
                     className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
                     title="Delete transaction"
                   >

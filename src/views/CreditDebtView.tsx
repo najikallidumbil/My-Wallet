@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useWallet } from '../context/WalletContext';
-import { CreditDebtType, RecordStatus, CreditDebtRecord } from '../types';
+import { CreditDebtType, RecordStatus, CreditDebtRecord, Attachment } from '../types';
 import { formatRupees } from '../lib/currency';
 import { getDueStatus } from '../lib/date';
 import { StatusBadge } from '../components/common/StatusBadge';
+import { AttachmentUploader } from '../components/common/AttachmentUploader';
 import {
   HandCoins,
   Landmark,
@@ -15,10 +16,12 @@ import {
   Check,
   Trash2,
   X,
+  Paperclip,
+  Eye,
 } from 'lucide-react';
 
 export const CreditDebtView: React.FC = () => {
-  const { creditDebtRecords, settleCreditDebt, deleteCreditDebt, openQuickAdd } = useWallet();
+  const { creditDebtRecords, settleCreditDebt, deleteCreditDebt, openQuickAdd, openRecordDetails } = useWallet();
 
   const [activeTab, setActiveTab] = useState<CreditDebtType>('credit');
   const [search, setSearch] = useState('');
@@ -27,6 +30,7 @@ export const CreditDebtView: React.FC = () => {
   // Settle modal state
   const [settleModalItem, setSettleModalItem] = useState<CreditDebtRecord | null>(null);
   const [settleAmount, setSettleAmount] = useState<string>('');
+  const [settleAttachments, setSettleAttachments] = useState<Attachment[]>([]);
 
   const filteredRecords = useMemo(() => {
     return creditDebtRecords.filter((record) => {
@@ -55,6 +59,7 @@ export const CreditDebtView: React.FC = () => {
   const handleOpenSettle = (record: CreditDebtRecord) => {
     setSettleModalItem(record);
     setSettleAmount(record.remainingAmount.toString());
+    setSettleAttachments([]);
   };
 
   const handleConfirmSettle = (e: React.FormEvent) => {
@@ -63,7 +68,11 @@ export const CreditDebtView: React.FC = () => {
     const amount = parseFloat(settleAmount);
     if (!amount || amount <= 0) return;
 
-    settleCreditDebt(settleModalItem.id, amount);
+    settleCreditDebt(
+      settleModalItem.id,
+      amount,
+      settleAttachments.length > 0 ? settleAttachments : undefined
+    );
     setSettleModalItem(null);
   };
 
@@ -220,9 +229,22 @@ export const CreditDebtView: React.FC = () => {
                 {/* Top: Counterpart name & Status badge */}
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      {item.counterpartName}
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        {item.counterpartName}
+                      </h3>
+                      {item.attachments && item.attachments.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openRecordDetails(item, 'credit-debt')}
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-950 px-1.5 py-0.5 rounded-md hover:bg-brand-100"
+                          title={`${item.attachments.length} attachment(s)`}
+                        >
+                          <Paperclip className="w-3 h-3" />
+                          <span>{item.attachments.length}</span>
+                        </button>
+                      )}
+                    </div>
                     {item.counterpartPhone && (
                       <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5">
                         <Phone className="w-3 h-3 text-slate-400" />
@@ -323,6 +345,15 @@ export const CreditDebtView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openRecordDetails(item, 'credit-debt')}
+                      className="p-1.5 text-slate-400 hover:text-brand-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      title="View details & attachments"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+
                     {!isSettled && (
                       <button
                         onClick={() => handleOpenSettle(item)}
@@ -351,10 +382,10 @@ export const CreditDebtView: React.FC = () => {
       {/* Settle Record Modal */}
       {settleModalItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Record Settlement
+                Record Settlement / Repayment
               </h3>
               <button
                 onClick={() => setSettleModalItem(null)}
@@ -387,6 +418,15 @@ export const CreditDebtView: React.FC = () => {
                   onChange={(e) => setSettleAmount(e.target.value)}
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-lg font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                   required
+                />
+              </div>
+
+              {/* Repayment Attachment Uploader */}
+              <div className="pt-1">
+                <AttachmentUploader
+                  attachments={settleAttachments}
+                  onChange={setSettleAttachments}
+                  label="Repayment Proof / Receipt (Optional)"
                 />
               </div>
 

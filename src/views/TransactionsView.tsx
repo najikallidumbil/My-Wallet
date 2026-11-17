@@ -7,7 +7,7 @@ import { PaymentBadge } from '../components/common/PaymentBadge';
 import { Search, Plus, Filter, Trash2, Paperclip, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 
 export const TransactionsView: React.FC = () => {
-  const { transactions, categories, deleteTransaction, openQuickAdd } = useWallet();
+  const { transactions, categories, deleteTransaction, openQuickAdd, openRecordDetails } = useWallet();
 
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
@@ -179,7 +179,8 @@ export const TransactionsView: React.FC = () => {
               return (
                 <div
                   key={tx.id}
-                  className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
+                  onClick={() => openRecordDetails(tx, 'transaction')}
+                  className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
                     <div
@@ -201,7 +202,13 @@ export const TransactionsView: React.FC = () => {
                           {tx.title}
                         </span>
                         {tx.attachments && tx.attachments.length > 0 && (
-                          <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-950 px-1.5 py-0.5 rounded-md"
+                            title={`${tx.attachments.length} attachment(s)`}
+                          >
+                            <Paperclip className="w-3 h-3" />
+                            <span>{tx.attachments.length}</span>
+                          </span>
                         )}
                       </div>
                       {tx.description && (
@@ -234,7 +241,10 @@ export const TransactionsView: React.FC = () => {
                     </span>
 
                     <button
-                      onClick={() => deleteTransaction(tx.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteTransaction(tx.id);
+                      }}
                       className="p-2 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                       title="Delete transaction"
                     >

@@ -23,6 +23,7 @@ export interface Attachment {
   fileType: string;
   fileSize: number;
   storagePath: string;
+  dataUrl?: string;
   createdAt: string;
 }
 
@@ -95,4 +96,5 @@ export interface QuickAddPayload {
   date: string;
   dueDate?: string;
   description?: string;
+  attachments?: Attachment[];
 }
