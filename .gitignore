@@ -26,3 +26,8 @@ dist-ssr
 # Environment variables
 .env
 .env*.local
+
+# Expo
+.expo/
+dist_expo/
+dist_test/

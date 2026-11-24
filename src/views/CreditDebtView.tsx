@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 
 export const CreditDebtView: React.FC = () => {
-  const { creditDebtRecords, settleCreditDebt, deleteCreditDebt, openQuickAdd, openRecordDetails } = useWallet();
+  const { creditDebtRecords, settleCreditDebt, deleteCreditDebt, openQuickAdd, openRecordDetails, openReminderModal } = useWallet();
 
   const [activeTab, setActiveTab] = useState<CreditDebtType>('credit');
   const [search, setSearch] = useState('');
@@ -31,6 +31,12 @@ export const CreditDebtView: React.FC = () => {
   const [settleModalItem, setSettleModalItem] = useState<CreditDebtRecord | null>(null);
   const [settleAmount, setSettleAmount] = useState<string>('');
   const [settleAttachments, setSettleAttachments] = useState<Attachment[]>([]);
+  const [settleDate, setSettleDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [settleTime, setSettleTime] = useState<string>(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
+  const [settleNotes, setSettleNotes] = useState<string>('');
 
   const filteredRecords = useMemo(() => {
     return creditDebtRecords.filter((record) => {
@@ -60,6 +66,10 @@ export const CreditDebtView: React.FC = () => {
     setSettleModalItem(record);
     setSettleAmount(record.remainingAmount.toString());
     setSettleAttachments([]);
+    setSettleDate(new Date().toISOString().split('T')[0]);
+    const now = new Date();
+    setSettleTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    setSettleNotes('');
   };
 
   const handleConfirmSettle = (e: React.FormEvent) => {
@@ -71,7 +81,10 @@ export const CreditDebtView: React.FC = () => {
     settleCreditDebt(
       settleModalItem.id,
       amount,
-      settleAttachments.length > 0 ? settleAttachments : undefined
+      settleAttachments.length > 0 ? settleAttachments : undefined,
+      settleNotes.trim() || undefined,
+      settleDate,
+      settleTime
     );
     setSettleModalItem(null);
   };
@@ -322,25 +335,24 @@ export const CreditDebtView: React.FC = () => {
                 {/* Action Toolbar */}
                 <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => openReminderModal(item)}
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors border border-emerald-200/80 dark:border-emerald-800 flex items-center gap-1.5"
+                      title="Send customized WhatsApp or SMS reminder"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Remind</span>
+                    </button>
+
                     {item.counterpartPhone && (
-                      <>
-                        <a
-                          href={`tel:${item.counterpartPhone}`}
-                          className="p-1.5 text-slate-500 hover:text-brand-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                          title="Call counterpart"
-                        >
-                          <Phone className="w-3.5 h-3.5" />
-                        </a>
-                        <a
-                          href={`https://wa.me/${item.counterpartPhone.replace(/[^0-9]/g, '')}?text=Hi ${item.counterpartName}, regarding the wallet khata balance of ${formatRupees(item.remainingAmount)}.`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 text-slate-500 hover:text-emerald-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                          title="WhatsApp reminder"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                        </a>
-                      </>
+                      <a
+                        href={`tel:${item.counterpartPhone}`}
+                        className="p-1.5 text-slate-500 hover:text-brand-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                        title="Call counterpart"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                      </a>
                     )}
                   </div>
 
@@ -418,6 +430,47 @@ export const CreditDebtView: React.FC = () => {
                   onChange={(e) => setSettleAmount(e.target.value)}
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-lg font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                   required
+                />
+              </div>
+
+              {/* Repayment Date & Time */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                    Repayment Date
+                  </label>
+                  <input
+                    type="date"
+                    value={settleDate}
+                    onChange={(e) => setSettleDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                    Repayment Time
+                  </label>
+                  <input
+                    type="time"
+                    value={settleTime}
+                    onChange={(e) => setSettleTime(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                  Payment Notes (e.g. GPay UPI ref, Cash)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Received ₹2,000 via UPI"
+                  value={settleNotes}
+                  onChange={(e) => setSettleNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>
 

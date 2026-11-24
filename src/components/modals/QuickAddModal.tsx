@@ -6,16 +6,29 @@ import { CURRENCY_SYMBOL } from '../../lib/currency';
 import { AttachmentUploader } from '../common/AttachmentUploader';
 
 export const QuickAddModal: React.FC = () => {
-  const { isQuickAddOpen, closeQuickAdd, quickAddInitialMode, categories, quickAdd } = useWallet();
+  const {
+    isQuickAddOpen,
+    closeQuickAdd,
+    quickAddInitialMode,
+    categories,
+    accounts,
+    people,
+    quickAdd,
+  } = useWallet();
 
   const [mode, setMode] = useState<'income' | 'expense' | 'credit' | 'debt'>('expense');
   const [amount, setAmount] = useState<string>('');
   const [title, setTitle] = useState<string>('');
   const [categoryId, setCategoryId] = useState<string>('');
+  const [accountId, setAccountId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('upi');
   const [counterpartName, setCounterpartName] = useState<string>('');
   const [counterpartPhone, setCounterpartPhone] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [time, setTime] = useState<string>(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
   const [dueDate, setDueDate] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -31,11 +44,16 @@ export const QuickAddModal: React.FC = () => {
       setCounterpartPhone('');
       setDescription('');
       setDate(new Date().toISOString().split('T')[0]);
+      const now = new Date();
+      setTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
       setDueDate('');
       setAttachments([]);
       setError(null);
+      if (accounts.length > 0) {
+        setAccountId(accounts[0].id);
+      }
     }
-  }, [isQuickAddOpen, quickAddInitialMode]);
+  }, [isQuickAddOpen, quickAddInitialMode, accounts]);
 
   // Set default category when mode or categories change
   useEffect(() => {
@@ -53,18 +71,18 @@ export const QuickAddModal: React.FC = () => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!numAmount || numAmount <= 0) {
-      setError('Please enter a valid amount greater than 0');
+      setError('Please enter a valid positive amount.');
       return;
     }
 
     if (mode === 'income' || mode === 'expense') {
       if (!title.trim()) {
-        setError('Please enter a transaction title');
+        setError('Please enter a transaction title.');
         return;
       }
     } else {
       if (!counterpartName.trim()) {
-        setError('Please enter the contact person or business name');
+        setError('Please enter the person or business name.');
         return;
       }
     }
@@ -73,17 +91,20 @@ export const QuickAddModal: React.FC = () => {
       mode,
       amount: numAmount,
       title: title.trim() || counterpartName.trim(),
-      categoryId: (mode === 'income' || mode === 'expense') ? categoryId : undefined,
-      paymentMethod: (mode === 'income' || mode === 'expense') ? paymentMethod : undefined,
-      counterpartName: (mode === 'credit' || mode === 'debt') ? counterpartName.trim() : undefined,
-      counterpartPhone: (mode === 'credit' || mode === 'debt') ? counterpartPhone.trim() : undefined,
+      categoryId: mode === 'income' || mode === 'expense' ? categoryId : undefined,
+      accountId: mode === 'income' || mode === 'expense' ? accountId : undefined,
+      paymentMethod: mode === 'income' || mode === 'expense' ? paymentMethod : undefined,
+      counterpartName: mode === 'credit' || mode === 'debt' ? counterpartName.trim() : undefined,
+      counterpartPhone: mode === 'credit' || mode === 'debt' ? counterpartPhone.trim() : undefined,
       date,
-      dueDate: (mode === 'credit' || mode === 'debt') ? (dueDate || undefined) : undefined,
+      time,
+      dueDate: mode === 'credit' || mode === 'debt' ? dueDate || undefined : undefined,
       description: description.trim() || undefined,
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     quickAdd(payload);
+    closeQuickAdd();
   };
 
   const filteredCategories = categories.filter((c) =>
@@ -109,12 +130,15 @@ export const QuickAddModal: React.FC = () => {
           </button>
         </div>
 
-        {/* Tab selection */}
+        {/* 4 Dynamic Type Selectors */}
         <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800">
           <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-200/60 dark:bg-slate-800 rounded-2xl">
             <button
               type="button"
-              onClick={() => { setMode('expense'); setCategoryId(''); }}
+              onClick={() => {
+                setMode('expense');
+                setCategoryId('');
+              }}
               className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center gap-1 transition-all ${
                 mode === 'expense'
                   ? 'bg-rose-500 text-white shadow-sm'
@@ -127,7 +151,10 @@ export const QuickAddModal: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => { setMode('income'); setCategoryId(''); }}
+              onClick={() => {
+                setMode('income');
+                setCategoryId('');
+              }}
               className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center gap-1 transition-all ${
                 mode === 'income'
                   ? 'bg-emerald-500 text-white shadow-sm'
@@ -177,7 +204,7 @@ export const QuickAddModal: React.FC = () => {
           {/* Amount Input */}
           <div>
             <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">
-              Amount (INR)
+              Amount (INR) *
             </label>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-slate-400">
@@ -186,7 +213,7 @@ export const QuickAddModal: React.FC = () => {
               <input
                 type="number"
                 step="any"
-                min="0"
+                min="0.01"
                 autoFocus
                 placeholder="0.00"
                 value={amount}
@@ -197,16 +224,20 @@ export const QuickAddModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Title or Counterpart Details */}
-          {(mode === 'income' || mode === 'expense') ? (
+          {/* Dynamic Fields for Income & Expense */}
+          {mode === 'income' || mode === 'expense' ? (
             <>
               <div>
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                  Title / Reason
+                  Title / Description *
                 </label>
                 <input
                   type="text"
-                  placeholder={mode === 'expense' ? 'e.g. Swiggy Food, D-Mart Grocery' : 'e.g. Salary, Client Milestone'}
+                  placeholder={
+                    mode === 'expense'
+                      ? 'e.g. Swiggy Food, D-Mart Grocery'
+                      : 'e.g. Monthly Salary, Freelance Milestone'
+                  }
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -214,8 +245,8 @@ export const QuickAddModal: React.FC = () => {
                 />
               </div>
 
-              {/* Category & Payment Method */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Category, Account & Payment Method */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
                     Category
@@ -223,11 +254,28 @@ export const QuickAddModal: React.FC = () => {
                   <select
                     value={categoryId}
                     onChange={(e) => setCategoryId(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                   >
                     {filteredCategories.map((cat) => (
                       <option key={cat.id} value={cat.id}>
                         {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                    Account
+                  </label>
+                  <select
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
                       </option>
                     ))}
                   </select>
@@ -240,121 +288,170 @@ export const QuickAddModal: React.FC = () => {
                   <select
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                   >
-                    <option value="upi">UPI (GPay / PhonePe / Paytm)</option>
+                    <option value="upi">UPI</option>
                     <option value="cash">Cash</option>
-                    <option value="card">Debit / Credit Card</option>
-                    <option value="bank_transfer">Net Banking / NEFT</option>
+                    <option value="card">Card</option>
+                    <option value="bank_transfer">Net Banking</option>
                     <option value="other">Other</option>
                   </select>
                 </div>
               </div>
             </>
           ) : (
+            /* Dynamic Fields for Credit & Debt (Khata) */
             <>
-              {/* Credit or Debt Details */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                    {mode === 'credit' ? 'Person who owes you' : 'Person you owe to'}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+                    {mode === 'credit'
+                      ? 'Person who owes you (Borrower) *'
+                      : 'Person you owe to (Lender) *'}
                   </label>
+                  {people.length > 0 && (
+                    <span className="text-[10px] text-brand-600 dark:text-brand-400 font-semibold">
+                      Select or type name
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-2">
                   <input
                     type="text"
+                    list="people-datalist"
                     placeholder="e.g. Ramesh Kumar"
                     value={counterpartName}
-                    onChange={(e) => setCounterpartName(e.target.value)}
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      setCounterpartName(name);
+                      // Auto-fill phone if person recognized
+                      const match = people.find(
+                        (p) => p.name.toLowerCase() === name.trim().toLowerCase()
+                      );
+                      if (match && match.phone) {
+                        setCounterpartPhone(match.phone);
+                      }
+                    }}
                     className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                     required
                   />
+                  <datalist id="people-datalist">
+                    {people.map((p) => (
+                      <option key={p.id} value={p.name} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                    Mobile Number (WhatsApp & SMS Reminders)
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="e.g. 9876543210"
+                    value={counterpartPhone}
+                    onChange={(e) => setCounterpartPhone(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                    Phone Number (Optional)
+                    Due Date (Optional)
                   </label>
                   <input
-                    type="tel"
-                    placeholder="+91 98765 43210"
-                    value={counterpartPhone}
-                    onChange={(e) => setCounterpartPhone(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                  Expected Return / Due Date
-                </label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
               </div>
             </>
           )}
 
-          {/* Date & Notes */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Date & Time Side-by-Side */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                Transaction Date
+                Transaction Date *
               </label>
               <input
                 type="date"
+                required
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                Notes (Optional)
+                Transaction Time *
               </label>
               <input
-                type="text"
-                placeholder="Add any context or reminder"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                type="time"
+                required
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
               />
             </div>
           </div>
 
-          {/* Real Attachments Uploader */}
-          <div className="pt-2">
-            <AttachmentUploader
-              attachments={attachments}
-              onChange={setAttachments}
+          {/* Description / Notes */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+              Notes / Description (Optional)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Paid via Google Pay, Split dinner bill"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
             />
           </div>
 
-          {/* Action buttons */}
-          <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
+          {/* Real Attachment Uploader: Camera + Webcam + Files */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+              Receipt Attachment (Photo or PDF)
+            </label>
+            <AttachmentUploader attachments={attachments} onChange={setAttachments} />
+          </div>
+
+          {/* Modal Action Buttons */}
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={closeQuickAdd}
-              className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="px-4 py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className={`px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md active:scale-95 transition-all ${
+              className={`px-5 py-2.5 text-white font-semibold text-xs rounded-xl shadow-md transition-all active:scale-95 ${
                 mode === 'income'
-                  ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
+                  ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
                   : mode === 'expense'
-                  ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20'
+                  ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20'
                   : mode === 'credit'
-                  ? 'bg-cyan-600 hover:bg-cyan-500 shadow-cyan-600/20'
-                  : 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20'
+                  ? 'bg-cyan-600 hover:bg-cyan-500 shadow-cyan-500/20'
+                  : 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/20'
               }`}
             >
-              Save Record
+              {mode === 'income'
+                ? 'Save Income'
+                : mode === 'expense'
+                ? 'Save Expense'
+                : mode === 'credit'
+                ? 'Record Credit'
+                : 'Record Debt'}
             </button>
           </div>
         </form>

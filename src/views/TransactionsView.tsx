@@ -220,6 +220,7 @@ export const TransactionsView: React.FC = () => {
                         <PaymentBadge method={tx.paymentMethod} />
                         <span className="text-[11px] text-slate-400 dark:text-slate-500">
                           {formatDate(tx.transactionDate)}
+                          {tx.transactionTime ? ` · ${tx.transactionTime}` : ''}
                         </span>
                         <span className="text-[11px] text-slate-400">·</span>
                         <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">

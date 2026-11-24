@@ -15,6 +15,7 @@ import {
   Paperclip,
   ZoomIn,
 } from 'lucide-react';
+import { CameraCaptureModal } from './CameraCaptureModal';
 
 interface AttachmentUploaderProps {
   attachments: Attachment[];
@@ -36,6 +37,37 @@ export const AttachmentUploader: React.FC<AttachmentUploaderProps> = ({
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isWebcamOpen, setIsWebcamOpen] = useState(false);
+
+  const handleTakePhotoClick = () => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    );
+    if (isMobile) {
+      cameraInputRef.current?.click();
+    } else {
+      setIsWebcamOpen(true);
+    }
+  };
+
+  const handleCapturedPhoto = async (file: File) => {
+    if (attachments.length >= maxFiles) {
+      setErrorMessage(`You can upload up to ${maxFiles} attachments.`);
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const attachment = await processFileToAttachment(file);
+      onChange([...attachments, attachment]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to process camera photo';
+      setErrorMessage(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -125,7 +157,7 @@ export const AttachmentUploader: React.FC<AttachmentUploaderProps> = ({
           <button
             type="button"
             disabled={isLoading || attachments.length >= maxFiles}
-            onClick={() => cameraInputRef.current?.click()}
+            onClick={handleTakePhotoClick}
             className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-200/80 dark:border-slate-700"
           >
             <Camera className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
@@ -239,6 +271,13 @@ export const AttachmentUploader: React.FC<AttachmentUploaderProps> = ({
       <p className="text-[10px] text-slate-400 dark:text-slate-500">
         Supports JPG, PNG, WEBP and PDF up to 10 MB per file.
       </p>
+
+      {/* Live Camera Modal (Desktop Webcam or fallback) */}
+      <CameraCaptureModal
+        isOpen={isWebcamOpen}
+        onClose={() => setIsWebcamOpen(false)}
+        onCapture={handleCapturedPhoto}
+      />
     </div>
   );
 };

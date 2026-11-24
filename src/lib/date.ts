@@ -41,6 +41,19 @@ export function formatFullDate(dateString: string): string {
   }
 }
 
+export function formatTime(timeStr?: string): string {
+  if (!timeStr) return '';
+  try {
+    const [h, m] = timeStr.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return timeStr;
+    const period = h >= 12 ? 'PM' : 'AM';
+    const hours12 = h % 12 || 12;
+    return `${hours12}:${String(m).padStart(2, '0')} ${period}`;
+  } catch {
+    return timeStr;
+  }
+}
+
 export interface DueStatus {
   label: string;
   isOverdue: boolean;

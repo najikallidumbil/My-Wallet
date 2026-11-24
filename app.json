@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "My Wallet",
+    "slug": "my-wallet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0284c7"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app needs access to your photos to attach transaction bills and receipts.",
+          "cameraPermission": "The app needs access to your camera to take transaction receipt photos."
+        }
+      ],
+      "expo-document-picker",
+      "expo-asset",
+      "expo-status-bar"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6e4dd0e2-c864-45d9-bd39-cbb9fbb750e6"
+      }
+    }
+  }
+}
