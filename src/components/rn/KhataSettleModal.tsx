@@ -13,8 +13,6 @@ import {
 import {
   X,
   CheckCircle2,
-  Calendar,
-  Clock,
   ArrowDownLeft,
   ArrowUpRight,
   UserCheck,
@@ -22,6 +20,7 @@ import {
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
 import { formatRupees } from '../../lib/currency';
+import { DateTimePickerField } from './DateTimePickerField';
 
 interface KhataSettleModalProps {
   visible: boolean;
@@ -48,11 +47,19 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const now = new Date();
-  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const [date, setDate] = useState(todayStr);
-  const [time, setTime] = useState(timeStr);
+  const getNowLocal = () => {
+    const n = new Date();
+    const y = n.getFullYear();
+    const m = String(n.getMonth() + 1).padStart(2, '0');
+    const d = String(n.getDate()).padStart(2, '0');
+    const hh = String(n.getHours()).padStart(2, '0');
+    const mm = String(n.getMinutes()).padStart(2, '0');
+    return { date: `${y}-${m}-${d}`, time: `${hh}:${mm}` };
+  };
+
+  const initialDateTime = getNowLocal();
+  const [date, setDate] = useState(initialDateTime.date);
+  const [time, setTime] = useState(initialDateTime.time);
 
   const targetType = mode === 'receive' ? 'credit' : 'debt';
 
@@ -81,11 +88,9 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
     if (visible) {
       setAmount('');
       setNotes('');
-      setDate(new Date().toISOString().split('T')[0]);
-      const currentNow = new Date();
-      setTime(
-        `${String(currentNow.getHours()).padStart(2, '0')}:${String(currentNow.getMinutes()).padStart(2, '0')}`
-      );
+      const current = getNowLocal();
+      setDate(current.date);
+      setTime(current.time);
 
       if (initialPersonId && eligiblePeople.some((e) => e.person.id === initialPersonId)) {
         setSelectedPersonId(initialPersonId);
@@ -290,34 +295,16 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
                 />
               </View>
 
-              {/* Date & Time */}
-              <View style={styles.dualRow}>
-                <View style={styles.dualCol}>
-                  <Text style={styles.inputLabel}>DATE</Text>
-                  <View style={styles.iconInput}>
-                    <Calendar size={14} color={colors.slate[400]} />
-                    <TextInput
-                      style={styles.inlineInput}
-                      value={date}
-                      onChangeText={setDate}
-                      placeholder="YYYY-MM-DD"
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.dualCol}>
-                  <Text style={styles.inputLabel}>TIME</Text>
-                  <View style={styles.iconInput}>
-                    <Clock size={14} color={colors.slate[400]} />
-                    <TextInput
-                      style={styles.inlineInput}
-                      value={time}
-                      onChangeText={setTime}
-                      placeholder="HH:MM"
-                    />
-                  </View>
-                </View>
-              </View>
+              {/* ONE Single-Line Combined Date & Time Field */}
+              <DateTimePickerField
+                date={date}
+                time={time}
+                onChange={(newDate, newTime) => {
+                  setDate(newDate);
+                  setTime(newTime);
+                }}
+                label={mode === 'receive' ? 'PAYMENT RECEIVED DATE & TIME' : 'REPAYMENT DATE & TIME'}
+              />
 
               {/* Notes */}
               <View style={styles.inputGroup}>
