@@ -35,6 +35,7 @@ export const AuthScreen: React.FC = () => {
   const {
     connectionStatus,
     connectionError,
+    latencyMs,
     projectDomain,
     sendOtp,
     verifyOtp,
@@ -197,9 +198,9 @@ export const AuthScreen: React.FC = () => {
             <View style={styles.connectedBanner}>
               <View style={styles.statusDotGreen} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.connectedTitle}>Supabase Cloud Connected</Text>
+                <Text style={styles.connectedTitle}>Supabase Connected</Text>
                 <Text style={styles.connectedSubtitle} numberOfLines={1}>
-                  {projectDomain || 'ruhifsmbgfhxoumfvoyl.supabase.co'}
+                  {projectDomain || 'ruhifsmbgfhxoumfvoyl.supabase.co'}{latencyMs ? ` • ${latencyMs}ms` : ''}
                 </Text>
               </View>
               <TouchableOpacity
@@ -212,13 +213,25 @@ export const AuthScreen: React.FC = () => {
             </View>
           )}
 
+          {connectionStatus === 'checking' && (
+            <View style={styles.checkingBanner}>
+              <ActivityIndicator size="small" color={colors.brand[600]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.checkingTitle}>Connecting to Supabase...</Text>
+                <Text style={styles.checkingSubtitle} numberOfLines={1}>
+                  Verifying secure connection to cloud database
+                </Text>
+              </View>
+            </View>
+          )}
+
           {connectionStatus === 'not_configured' && (
             <View style={styles.unconfiguredBanner}>
               <AlertCircle size={18} color={colors.warning.text} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.unconfiguredTitle}>Supabase Not Connected</Text>
+                <Text style={styles.unconfiguredTitle}>Supabase Connection Failed</Text>
                 <Text style={styles.unconfiguredText}>
-                  Supabase credentials are not configured. Connect your Supabase project to enable email OTP login and cloud backup.
+                  {connectionError || 'Supabase credentials are not configured. Connect your Supabase project to enable email OTP login and cloud backup.'}
                 </Text>
                 <View style={styles.unconfiguredActions}>
                   <TouchableOpacity
@@ -243,7 +256,7 @@ export const AuthScreen: React.FC = () => {
             <View style={styles.errorBanner}>
               <AlertCircle size={18} color={colors.expense.text} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.errorBannerTitle}>Supabase Connection Error</Text>
+                <Text style={styles.errorBannerTitle}>Supabase Connection Failed</Text>
                 <Text style={styles.errorBannerSubtitle}>
                   {connectionError || 'Could not verify connection to Supabase.'}
                 </Text>
@@ -260,7 +273,7 @@ export const AuthScreen: React.FC = () => {
                     onPress={() => checkConnection()}
                   >
                     <RotateCcw size={13} color={colors.slate[700]} />
-                    <Text style={styles.guestBtnText}>Retry</Text>
+                    <Text style={styles.guestBtnText}>Retry Connection</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -271,9 +284,9 @@ export const AuthScreen: React.FC = () => {
             <View style={styles.offlineBanner}>
               <AlertCircle size={18} color={colors.slate[600]} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.offlineTitle}>Network Offline</Text>
+                <Text style={styles.offlineTitle}>Supabase Connection Failed</Text>
                 <Text style={styles.offlineText}>
-                  Cannot reach Supabase servers. Check your internet connection or use offline mode.
+                  {connectionError || 'Cannot reach Supabase servers. Check your internet connection or use offline mode.'}
                 </Text>
                 <View style={styles.unconfiguredActions}>
                   <TouchableOpacity
@@ -281,7 +294,7 @@ export const AuthScreen: React.FC = () => {
                     onPress={() => checkConnection()}
                   >
                     <RotateCcw size={13} color={colors.slate[700]} />
-                    <Text style={styles.guestBtnText}>Retry</Text>
+                    <Text style={styles.guestBtnText}>Retry Connection</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.guestBtn}
@@ -610,6 +623,28 @@ const styles = StyleSheet.create({
     color: colors.income.text,
   },
   connectedSubtitle: {
+    fontSize: 10,
+    color: colors.slate[600],
+    marginTop: 1,
+  },
+  checkingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.brand[50],
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+    marginBottom: 16,
+  },
+  checkingTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.brand[700],
+  },
+  checkingSubtitle: {
     fontSize: 10,
     color: colors.slate[600],
     marginTop: 1,

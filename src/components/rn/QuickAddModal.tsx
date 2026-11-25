@@ -32,9 +32,12 @@ import { colors } from '../../theme/colors';
 import { Attachment, Person } from '../../types';
 import { useResponsive } from '../../lib/useResponsive';
 import { AddPersonModal } from './AddPersonModal';
+import { PhoneSelectorModal } from './PhoneSelectorModal';
 import {
   pickContactFromDevice,
   findDuplicatePerson,
+  openDeviceSettings,
+  ContactPhoneNumber,
 } from '../../lib/contactPicker';
 
 interface QuickAddModalProps {
@@ -74,6 +77,9 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [notes, setNotes] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isAddPersonModalOpen, setIsAddPersonModalOpen] = useState(false);
+  const [phoneModalVisible, setPhoneModalVisible] = useState(false);
+  const [pendingPhones, setPendingPhones] = useState<ContactPhoneNumber[]>([]);
+  const [pendingContactName, setPendingContactName] = useState('');
 
   const todayStr = new Date().toISOString().split('T')[0];
   const now = new Date();
@@ -143,25 +149,49 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     try {
       const result = await pickContactFromDevice();
       if (result.success && result.contact) {
-        setPersonName(result.contact.name);
-        setPersonPhone(result.contact.phone);
+        const { name: importedName, phone: importedPhone, phones, hasNoPhone } = result.contact;
+        setPersonName(importedName);
+
+        if (phones && phones.length > 1) {
+          setPendingContactName(importedName);
+          setPendingPhones(phones);
+          setPhoneModalVisible(true);
+        } else if (hasNoPhone || !importedPhone) {
+          setPersonPhone('');
+          Alert.alert(
+            'No Phone Number Found',
+            'No phone number found for this contact. Please enter manually.'
+          );
+        } else {
+          setPersonPhone(importedPhone);
+        }
 
         const duplicate = findDuplicatePerson(
-          result.contact.name,
-          result.contact.phone,
+          importedName,
+          importedPhone,
           people
         );
         if (duplicate) {
           setSelectedPersonId(duplicate.id);
-          Alert.alert('Contact Selected', `Linked to existing Khata contact "${duplicate.name}".`);
+          Alert.alert('Contact Linked', `Linked to existing Khata contact "${duplicate.name}".`);
         } else {
-          // Auto-save in Khata Book for seamless relationship tracking
-          const created = addPerson({
-            name: result.contact.name,
-            phone: result.contact.phone,
-          });
-          setSelectedPersonId(created.id);
-          Alert.alert('Contact Added', `"${created.name}" saved to Khata Book and linked to this entry.`);
+          setSelectedPersonId(null);
+        }
+      } else if (result.permissionDenied) {
+        if (result.canOpenSettings) {
+          Alert.alert(
+            'Contacts Permission Required',
+            'MY WALLET needs permission to access your device contacts so you can quickly add people to your Khata Book.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => openDeviceSettings() },
+            ]
+          );
+        } else {
+          Alert.alert(
+            'Permission Denied',
+            'Contacts permission was denied. You can enter the name and phone number manually, or enable permission in Settings.'
+          );
         }
       } else if (!result.cancelled && result.error) {
         Alert.alert('Contacts Notice', result.error);
@@ -827,6 +857,16 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         onPersonAdded={(p) => {
           handleSelectPerson(p);
         }}
+      />
+
+      <PhoneSelectorModal
+        visible={phoneModalVisible}
+        contactName={pendingContactName || personName}
+        phones={pendingPhones}
+        onSelectPhone={(selectedNum) => {
+          setPersonPhone(selectedNum);
+        }}
+        onClose={() => setPhoneModalVisible(false)}
       />
     </Modal>
   );

@@ -21,8 +21,13 @@ import {
   Sparkles,
   CheckCircle2,
   ArrowRight,
+  Contact,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import {
+  pickContactFromDevice,
+  isContactPickerSupported,
+} from '../lib/contactPicker';
 
 export const KhataBookView: React.FC = () => {
   const {
@@ -155,6 +160,22 @@ export const KhataBookView: React.FC = () => {
     const maxVal = Math.max(...months.map((m) => Math.max(m.borrowed, m.repaid)), 1000);
     return { months, maxVal };
   }, [creditDebtRecords]);
+
+  const handleImportContact = async () => {
+    try {
+      const result = await pickContactFromDevice();
+      if (result.success && result.contact) {
+        setNewPersonName(result.contact.name);
+        if (result.contact.phone) {
+          setNewPersonPhone(result.contact.phone);
+        }
+      } else if (!result.cancelled && result.error) {
+        alert(result.error);
+      }
+    } catch (e) {
+      console.warn('Failed to pick contact:', e);
+    }
+  };
 
   // Handlers
   const handleCreatePerson = (e: React.FormEvent) => {
@@ -825,9 +846,21 @@ export const KhataBookView: React.FC = () => {
 
             <form onSubmit={handleCreatePerson} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Full Name *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Full Name *
+                  </label>
+                  {isContactPickerSupported() && (
+                    <button
+                      type="button"
+                      onClick={handleImportContact}
+                      className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 flex items-center gap-1 bg-brand-50 dark:bg-brand-950/50 px-2 py-0.5 rounded-lg border border-brand-200 dark:border-brand-800"
+                    >
+                      <Contact className="w-3 h-3" />
+                      Import from Contacts
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
                   required

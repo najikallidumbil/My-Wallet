@@ -6,15 +6,21 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSFaceIDUsageDescription": "MY WALLET requires Face ID authentication to secure your financial records."
-      }
+        "NSFaceIDUsageDescription": "MY WALLET requires Face ID authentication to secure your financial records.",
+        "NSContactsUsageDescription": "Allow MY WALLET to access your contacts to import people into Khata Book.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "n"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0284c7"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0284c7",
+        "backgroundImage": "./assets/adaptive-icon-background.png"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -22,11 +28,14 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
-      ]
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.READ_CONTACTS"
+      ],
+      "package": "com.naji_kallidumbil.mywallet"
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
@@ -44,12 +53,21 @@
         {
           "faceIDPermission": "Allow MY WALLET to use Face ID to authenticate you."
         }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow MY WALLET to access your contacts to import people into Khata Book."
+        }
       ]
     ],
     "extra": {
       "eas": {
         "projectId": "6e4dd0e2-c864-45d9-bd39-cbb9fbb750e6"
-      }
+      },
+      "supabaseUrl": "https://ruhifsmbgfhxoumfvoyl.supabase.co",
+      "supabaseAnonKey": "sb_publishable_6DUz-G2y2Ggw103rtR83aQ_yhmWPDo_",
+      "supabasePublishableKey": "sb_publishable_6DUz-G2y2Ggw103rtR83aQ_yhmWPDo_"
     }
   }
 }
