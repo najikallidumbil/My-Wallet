@@ -180,12 +180,13 @@ async function executeSyncItem(item: QueuedSyncItem): Promise<{ success: boolean
         return { success: true };
 
       case 'settings':
-        await client.from('user_settings').upsert({
+        const { error: setErr } = await client.from('user_settings').upsert({
           user_id: item.userId,
           opening_balance: item.payload.openingBalance,
           reminder_prefs: item.payload.reminderPreferences,
           last_synced_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
+        if (setErr) throw new Error(`[user_settings upsert] ${setErr.message}`);
         return { success: true };
 
       default:

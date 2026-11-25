@@ -43,9 +43,22 @@ import {
   fetchUserDataFromCloud,
   syncAllDataToCloud,
   CloudPayload,
+  cloudSavePerson,
+  cloudDeletePerson,
+  cloudSaveKhataRecord,
+  cloudDeleteKhataRecord,
+  cloudSaveTransaction,
+  cloudDeleteTransaction,
+  cloudSaveAccount,
+  cloudDeleteAccount,
+  cloudSaveTransfer,
+  cloudSaveBudget,
+  cloudSaveUserSettings,
+  cloudSaveMessage,
+  cloudDeleteMessage,
+  logDbOperation,
 } from '../services/cloudSync';
 import {
-  enqueueSyncItem,
   processSyncQueue,
   subscribeToSyncQueue,
   clearSyncQueue,
@@ -150,14 +163,14 @@ interface WalletContextType {
   deleteSubcategory: (categoryId: string, subcategoryId: string) => void;
 
   // Transaction Actions
-  addTransaction: (data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => Transaction;
-  updateTransaction: (id: string, updates: Partial<Transaction>) => void;
-  deleteTransaction: (id: string) => void;
-  updateTransactionAttachments: (id: string, attachments: Attachment[]) => void;
+  addTransaction: (data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Transaction>;
+  updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<Transaction | undefined>;
+  deleteTransaction: (id: string) => Promise<{ success: boolean; error?: string }>;
+  updateTransactionAttachments: (id: string, attachments: Attachment[]) => Promise<void>;
 
   // Khata Actions
-  addCreditDebt: (data: Omit<CreditDebtRecord, 'id' | 'remainingAmount' | 'createdAt' | 'updatedAt'>) => CreditDebtRecord;
-  updateCreditDebt: (id: string, updates: Partial<CreditDebtRecord>) => void;
+  addCreditDebt: (data: Omit<CreditDebtRecord, 'id' | 'remainingAmount' | 'createdAt' | 'updatedAt'>) => Promise<CreditDebtRecord>;
+  updateCreditDebt: (id: string, updates: Partial<CreditDebtRecord>) => Promise<CreditDebtRecord | undefined>;
   settleCreditDebt: (
     id: string,
     amount: number,
@@ -165,14 +178,14 @@ interface WalletContextType {
     notes?: string,
     paymentDate?: string,
     paymentTime?: string
-  ) => void;
-  updateCreditDebtAttachments: (id: string, attachments: Attachment[]) => void;
-  deleteCreditDebt: (id: string) => void;
+  ) => Promise<{ success: boolean; error?: string }>;
+  updateCreditDebtAttachments: (id: string, attachments: Attachment[]) => Promise<void>;
+  deleteCreditDebt: (id: string) => Promise<{ success: boolean; error?: string }>;
 
   // Multi-Account Actions
-  addAccount: (data: Omit<Account, 'id' | 'currentBalance' | 'createdAt'>) => Account;
-  updateAccount: (id: string, updates: Partial<Account>) => void;
-  deleteAccount: (id: string) => void;
+  addAccount: (data: Omit<Account, 'id' | 'currentBalance' | 'createdAt'>) => Promise<Account>;
+  updateAccount: (id: string, updates: Partial<Account>) => Promise<void>;
+  deleteAccount: (id: string) => Promise<{ success: boolean; error?: string }>;
   transferBetweenAccounts: (
     fromAccountId: string,
     toAccountId: string,
@@ -180,14 +193,14 @@ interface WalletContextType {
     date?: string,
     time?: string,
     notes?: string
-  ) => AccountTransfer;
+  ) => Promise<AccountTransfer>;
 
   // Person Actions
-  addPerson: (data: Omit<Person, 'id' | 'createdAt'>) => Person;
-  updatePerson: (id: string, updates: Partial<Person>) => void;
-  deletePerson: (id: string) => void;
-  archivePerson: (id: string) => void;
-  unarchivePerson: (id: string) => void;
+  addPerson: (data: Omit<Person, 'id' | 'createdAt'>) => Promise<Person>;
+  updatePerson: (id: string, updates: Partial<Person>) => Promise<void>;
+  deletePerson: (id: string) => Promise<{ success: boolean; error?: string }>;
+  archivePerson: (id: string) => Promise<void>;
+  unarchivePerson: (id: string) => Promise<void>;
 
   // Smart Messaging & Reminders
   messageHistory: MessageRecord[];
@@ -207,7 +220,7 @@ interface WalletContextType {
   processDueRecurringTransactions: () => number;
 
   // Unified Quick Add
-  quickAdd: (payload: QuickAddPayload) => void;
+  quickAdd: (payload: QuickAddPayload) => Promise<{ success: boolean; error?: string }>;
 
   // System
   resetToDefaults: () => void;
@@ -350,7 +363,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const setOpeningBalance = useCallback((val: number) => {
     setOpeningBalanceState(val);
     storage.setItem(STORAGE_KEYS.OPENING_BALANCE, val.toString());
-  }, []);
+    if (user?.id) {
+      cloudSaveUserSettings(user.id, { openingBalance: val }).catch(console.warn);
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
+  }, [user]);
 
   // Hydrate Data from Universal Storage on Mount
   useEffect(() => {
@@ -563,72 +580,73 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     async function syncOnLogin() {
       if (!currentUserId) return;
 
-      // If switching from another account or clean login, reset state first
-      if (activeUserIdRef.current !== currentUserId) {
-        activeUserIdRef.current = currentUserId;
-        setTransactions([]);
-        setCreditDebtRecords([]);
-        setPeople([]);
-        setAccounts(INITIAL_ACCOUNTS);
-        setBudgets([]);
-        setAccountTransfers([]);
-        setMessageHistory([]);
-        setOpeningBalanceState(0);
+      activeUserIdRef.current = currentUserId;
+      setSyncState('syncing');
+
+      // Step A: Immediately load from user's isolated offline cache so UI never flashes ₹0 or empty
+      try {
+        const cachedRaw = await storage.getItem(`my_wallet_offline_cache_${currentUserId}`);
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          if (cached && active) {
+            if (Array.isArray(cached.transactions) && cached.transactions.length > 0) setTransactions(cached.transactions);
+            if (Array.isArray(cached.creditDebtRecords) && cached.creditDebtRecords.length > 0) setCreditDebtRecords(cached.creditDebtRecords);
+            if (Array.isArray(cached.people) && cached.people.length > 0) setPeople(cached.people);
+            if (Array.isArray(cached.accounts) && cached.accounts.length > 0) setAccounts(cached.accounts);
+            if (Array.isArray(cached.budgets) && cached.budgets.length > 0) setBudgets(cached.budgets);
+            if (Array.isArray(cached.accountTransfers) && cached.accountTransfers.length > 0) setAccountTransfers(cached.accountTransfers);
+            if (Array.isArray(cached.categories) && cached.categories.length > 0) setCategories(cached.categories);
+            if (Array.isArray(cached.messageHistory) && cached.messageHistory.length > 0) setMessageHistory(cached.messageHistory);
+            if (typeof cached.openingBalance === 'number' && cached.openingBalance > 0) setOpeningBalanceState(cached.openingBalance);
+            console.log(`[Offline Cache Hydrated] Preloaded user ${currentUserId} data successfully from disk.`);
+          }
+        }
+      } catch (cacheErr) {
+        console.warn('[Offline Cache Preload Notice]', cacheErr);
       }
 
-      setSyncState('syncing');
+      // Step B: Query Supabase Cloud Ground Truth
       try {
         const cloudData = await fetchUserDataFromCloud(currentUserId);
         if (!active) return;
 
         if (!cloudData) {
-          // Cloud unreachable or offline: fallback to user-isolated offline cache
-          try {
-            const cachedRaw = await storage.getItem(`my_wallet_offline_cache_${currentUserId}`);
-            if (cachedRaw) {
-              const cached = JSON.parse(cachedRaw);
-              if (cached && active) {
-                if (Array.isArray(cached.transactions)) setTransactions(cached.transactions);
-                if (Array.isArray(cached.creditDebtRecords)) setCreditDebtRecords(cached.creditDebtRecords);
-                if (Array.isArray(cached.people)) setPeople(cached.people);
-                if (Array.isArray(cached.accounts) && cached.accounts.length > 0) setAccounts(cached.accounts);
-                if (Array.isArray(cached.budgets)) setBudgets(cached.budgets);
-                if (Array.isArray(cached.accountTransfers)) setAccountTransfers(cached.accountTransfers);
-                if (Array.isArray(cached.categories) && cached.categories.length > 0) setCategories(cached.categories);
-                if (Array.isArray(cached.messageHistory)) setMessageHistory(cached.messageHistory);
-                if (typeof cached.openingBalance === 'number') setOpeningBalanceState(cached.openingBalance);
-              }
-            }
-          } catch (_) {}
+          // Cloud unreachable or offline: user data remains safe in cache
+          console.warn('[Supabase Cloud Offline] Operating in offline mode with cached data.');
           setSyncState('offline');
           return;
         }
 
-        // If there are permission or critical query errors:
+        // If there are permission errors (e.g., 42501) or table query errors:
         if (cloudData.queryErrors && cloudData.queryErrors.length > 0) {
-          console.warn('Supabase cloud query errors reported:', cloudData.queryErrors);
+          console.error(
+            `[Supabase Cloud Database Diagnostics] Query errors reported for user ${currentUserId}:\n` +
+            cloudData.queryErrors.join('\n')
+          );
           setSyncState('error');
+          // IMPORTANT: NEVER wipe local state or reset to ₹0 when cloud queries fail!
           return;
         }
 
-        // Supabase is the PRIMARY DATABASE: Populate directly from Cloud ground truth
-        setTransactions(cloudData.transactions);
-        setCreditDebtRecords(cloudData.creditDebtRecords);
-        setPeople(cloudData.people);
-        setAccounts(cloudData.accounts.length > 0 ? cloudData.accounts : INITIAL_ACCOUNTS);
-        setBudgets(cloudData.budgets);
-        setAccountTransfers(cloudData.accountTransfers);
-        if (cloudData.categories.length > 0) {
+        // Step C: Supabase is the PRIMARY DATABASE: Clean cloud response received!
+        // Populate state directly from Cloud Ground Truth
+        setTransactions(cloudData.transactions || []);
+        setCreditDebtRecords(cloudData.creditDebtRecords || []);
+        setPeople(cloudData.people || []);
+        setAccounts(cloudData.accounts && cloudData.accounts.length > 0 ? cloudData.accounts : INITIAL_ACCOUNTS);
+        setBudgets(cloudData.budgets || []);
+        setAccountTransfers(cloudData.accountTransfers || []);
+        if (cloudData.categories && cloudData.categories.length > 0) {
           setCategories(cloudData.categories);
         }
         if (cloudData.messageHistory) {
           setMessageHistory(cloudData.messageHistory);
         }
-        if (cloudData.openingBalance > 0) {
+        if (typeof cloudData.openingBalance === 'number') {
           setOpeningBalanceState(cloudData.openingBalance);
         }
 
-        // Save to user-specific offline cache
+        // Save fresh ground truth to user-specific offline cache
         await storage.setItem(
           `my_wallet_offline_cache_${currentUserId}`,
           JSON.stringify({
@@ -679,44 +697,44 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Persist State to Storage (Only after hydration)
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-  }, [transactions, isHydrated, user?.id]);
+  }, [transactions, isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.CREDIT_DEBT, JSON.stringify(creditDebtRecords));
-  }, [creditDebtRecords, isHydrated, user?.id]);
+  }, [creditDebtRecords, isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
-  }, [categories, isHydrated, user?.id]);
+  }, [categories, isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(budgets));
-  }, [budgets, isHydrated, user?.id]);
+  }, [budgets, isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
-  }, [accounts, isHydrated, user?.id]);
+  }, [accounts, isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.TRANSFERS, JSON.stringify(accountTransfers));
-  }, [accountTransfers, isHydrated, user?.id]);
+  }, [accountTransfers, isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.PEOPLE, JSON.stringify(people));
-  }, [people, isHydrated, user?.id]);
+  }, [people, isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || user?.id) return;
+    if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.RECURRING, JSON.stringify(recurringTransactions));
-  }, [recurringTransactions, isHydrated, user?.id]);
+  }, [recurringTransactions, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -727,6 +745,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!isHydrated || !user?.id) return;
     const cacheKey = `my_wallet_offline_cache_${user.id}`;
+    // Only persist if we have valid initialized state to avoid overwriting cache on initial frame
     storage.setItem(
       cacheKey,
       JSON.stringify({
@@ -872,11 +891,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   // Transactions Actions
-  const addTransaction = useCallback((data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const addTransaction = useCallback(async (data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>): Promise<Transaction> => {
+    const numAmount = Number(data.amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      throw new Error('Please enter a valid amount greater than ₹0.');
+    }
+    const cleanTitle = (data.title || '').trim();
+    if (!cleanTitle) {
+      throw new Error('Please enter a transaction title.');
+    }
+
     const now = new Date();
     const defaultTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const newTx: Transaction = {
       ...data,
+      amount: numAmount,
+      title: cleanTitle,
       id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       transactionDate: data.transactionDate || now.toISOString().split('T')[0],
       transactionTime: data.transactionTime || defaultTime,
@@ -884,57 +914,93 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       updatedAt: now.toISOString(),
     };
 
-    setTransactions((prev) => [newTx, ...prev]);
-    if (user) {
-      enqueueSyncItem(user.id, 'transaction', newTx.id, 'upsert', newTx);
+    if (user?.id) {
+      const res = await cloudSaveTransaction(user.id, newTx);
+      if (!res.success) {
+        logDbOperation('transactions', 'upsert', user.id, false, res.error);
+        if (res.error?.code === '42501') {
+          throw new Error(`Database Error [42501]: Permission denied on table 'transactions'. Run the SQL setup script in Supabase.`);
+        }
+        throw new Error(res.error?.message || 'Failed to save transaction to database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
+
+    setTransactions((prev) => [newTx, ...prev]);
     return newTx;
   }, [user]);
 
-  const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
+  const updateTransaction = useCallback(async (id: string, updates: Partial<Transaction>): Promise<Transaction | undefined> => {
+    let updatedTx: Transaction | undefined;
     setTransactions((prev) =>
       prev.map((tx) => {
         if (tx.id !== id) return tx;
-        const updated = { ...tx, ...updates, updatedAt: new Date().toISOString() };
-        if (user) {
-          enqueueSyncItem(user.id, 'transaction', id, 'upsert', updated);
-          setLastSyncedAt(new Date().toLocaleTimeString());
-        }
-        return updated;
+        updatedTx = { ...tx, ...updates, updatedAt: new Date().toISOString() };
+        return updatedTx;
       })
     );
-    setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, ...updates } as Transaction) : prev));
-  }, [user]);
 
-  const deleteTransaction = useCallback((id: string) => {
-    setTransactions((prev) => prev.filter((tx) => tx.id !== id));
-    if (user) {
-      enqueueSyncItem(user.id, 'transaction', id, 'delete', { id });
+    if (updatedTx && user?.id) {
+      const res = await cloudSaveTransaction(user.id, updatedTx);
+      if (!res.success) {
+        logDbOperation('transactions', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to update transaction in database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
+
+    setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, ...updates } as Transaction) : prev));
+    return updatedTx;
   }, [user]);
 
-  const updateTransactionAttachments = useCallback((id: string, newAttachments: Attachment[]) => {
+  const deleteTransaction = useCallback(async (id: string): Promise<{ success: boolean; error?: string }> => {
+    if (user?.id) {
+      const res = await cloudDeleteTransaction(user.id, id);
+      if (!res.success) {
+        logDbOperation('transactions', 'delete', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to delete transaction from database');
+      }
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
+    setTransactions((prev) => prev.filter((tx) => tx.id !== id));
+    return { success: true };
+  }, [user]);
+
+  const updateTransactionAttachments = useCallback(async (id: string, newAttachments: Attachment[]): Promise<void> => {
+    let updatedTx: Transaction | undefined;
     setTransactions((prev) =>
       prev.map((tx) => {
         if (tx.id !== id) return tx;
-        const updated = { ...tx, attachments: newAttachments, updatedAt: new Date().toISOString() };
-        if (user) {
-          enqueueSyncItem(user.id, 'transaction', id, 'upsert', updated);
-          setLastSyncedAt(new Date().toLocaleTimeString());
-        }
-        return updated;
+        updatedTx = { ...tx, attachments: newAttachments, updatedAt: new Date().toISOString() };
+        return updatedTx;
       })
     );
+
+    if (updatedTx && user?.id) {
+      const res = await cloudSaveTransaction(user.id, updatedTx);
+      if (!res.success) {
+        logDbOperation('transactions', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to update attachments in database');
+      }
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
     setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, attachments: newAttachments } as Transaction) : prev));
   }, [user]);
 
   // Credit & Debt Actions
-  const addCreditDebt = useCallback((data: Omit<CreditDebtRecord, 'id' | 'remainingAmount' | 'createdAt' | 'updatedAt'>) => {
+  const addCreditDebt = useCallback(async (data: Omit<CreditDebtRecord, 'id' | 'remainingAmount' | 'createdAt' | 'updatedAt'>): Promise<CreditDebtRecord> => {
+    const numAmount = Number(data.originalAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      throw new Error('Please enter a valid amount greater than ₹0.');
+    }
+    const counterpart = (data.counterpartName || '').trim();
+    if (!counterpart) {
+      throw new Error('Please enter the customer / counterpart name.');
+    }
+
     const dueStatus = getDueStatus(data.dueDate);
-    const settled = data.settledAmount || 0;
-    const remaining = Math.max(0, data.originalAmount - settled);
+    const settled = Number(data.settledAmount) || 0;
+    const remaining = Math.max(0, numAmount - settled);
     const now = new Date();
     const defaultTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -949,18 +1015,37 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       status = 'pending';
     }
 
-    const counterpart = data.counterpartName ? data.counterpartName.trim() : '';
     let resolvedPersonId = data.personId;
-    if (counterpart && !resolvedPersonId) {
+    if (!resolvedPersonId) {
       const existing = people.find((p) => p.name.trim().toLowerCase() === counterpart.toLowerCase());
       if (existing) {
         resolvedPersonId = existing.id;
       }
     }
 
+    // If authenticated, persist person first if needed, then save Khata record
+    if (user?.id) {
+      if (!resolvedPersonId || !people.some((p) => p.id === resolvedPersonId)) {
+        const newPersonId = resolvedPersonId || `person-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+        const pRecord: Person = {
+          id: newPersonId,
+          name: counterpart,
+          phone: data.counterpartPhone,
+          email: data.counterpartEmail,
+          createdAt: now.toISOString(),
+        };
+        const pRes = await cloudSavePerson(user.id, pRecord);
+        if (pRes.success) {
+          resolvedPersonId = newPersonId;
+          setPeople((prev) => prev.some((p) => p.id === newPersonId) ? prev : [...prev, pRecord]);
+        }
+      }
+    }
+
     const newRecord: CreditDebtRecord = {
       ...data,
-      counterpartName: counterpart || data.counterpartName,
+      originalAmount: numAmount,
+      counterpartName: counterpart,
       personId: resolvedPersonId,
       transactionDate: data.transactionDate || now.toISOString().split('T')[0],
       transactionTime: data.transactionTime || defaultTime,
@@ -973,28 +1058,33 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       updatedAt: now.toISOString(),
     };
 
-    setCreditDebtRecords((prev) => [newRecord, ...prev]);
-    if (user) {
-      enqueueSyncItem(user.id, 'khata', newRecord.id, 'upsert', newRecord);
+    if (user?.id) {
+      const res = await cloudSaveKhataRecord(user.id, newRecord);
+      if (!res.success) {
+        logDbOperation('khata_transactions', 'upsert', user.id, false, res.error);
+        if (res.error?.code === '42501') {
+          throw new Error(`Database Error [42501]: Permission denied on table 'khata_transactions'. Run the SQL setup script in Supabase.`);
+        }
+        throw new Error(res.error?.message || 'Failed to save Khata record to database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
 
-    // Also auto-ensure person is tracked in people list
-    if (data.counterpartName) {
+    setCreditDebtRecords((prev) => [newRecord, ...prev]);
+
+    // Also auto-ensure person is tracked locally
+    if (counterpart) {
       setPeople((prev) => {
-        const cleanName = data.counterpartName.trim().toLowerCase();
+        const cleanName = counterpart.toLowerCase();
         const exists = prev.some((p) => p.name.trim().toLowerCase() === cleanName);
         if (!exists) {
           const newP: Person = {
-            id: `person-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-            name: data.counterpartName.trim(),
+            id: resolvedPersonId || `person-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            name: counterpart,
             phone: data.counterpartPhone,
             email: data.counterpartEmail,
             createdAt: now.toISOString(),
           };
-          if (user) {
-            enqueueSyncItem(user.id, 'person', newP.id, 'upsert', newP);
-          }
           return [...prev, newP];
         }
         return prev;
@@ -1004,7 +1094,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return newRecord;
   }, [user, people]);
 
-  const updateCreditDebt = useCallback((id: string, updates: Partial<CreditDebtRecord>) => {
+  const updateCreditDebt = useCallback(async (id: string, updates: Partial<CreditDebtRecord>): Promise<CreditDebtRecord | undefined> => {
+    let finalRec: CreditDebtRecord | undefined;
     setCreditDebtRecords((prev) =>
       prev.map((rec) => {
         if (rec.id !== id) return rec;
@@ -1017,32 +1108,49 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         else if (dueStatus.isOverdue) status = 'overdue';
         else if (settled > 0) status = 'partial';
         else status = 'pending';
-        const finalRec = { ...updated, remainingAmount: remaining, status };
-        if (user) {
-          enqueueSyncItem(user.id, 'khata', id, 'upsert', finalRec);
-          setLastSyncedAt(new Date().toLocaleTimeString());
-        }
+        finalRec = { ...updated, remainingAmount: remaining, status };
         return finalRec;
       })
     );
+
+    if (finalRec && user?.id) {
+      const res = await cloudSaveKhataRecord(user.id, finalRec);
+      if (!res.success) {
+        logDbOperation('khata_transactions', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to update Khata record in database');
+      }
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
+
     setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, ...updates } as CreditDebtRecord) : prev));
+    return finalRec;
   }, [user]);
 
-  const settleCreditDebt = useCallback((
+  const settleCreditDebt = useCallback(async (
     id: string,
     amount: number,
     settlementAttachments?: Attachment[],
     notes?: string,
     paymentDate?: string,
     paymentTime?: string
-  ) => {
+  ): Promise<{ success: boolean; error?: string }> => {
+    const targetRecord = creditDebtRecords.find((r) => r.id === id);
+    if (!targetRecord) {
+      throw new Error(`Record with id ${id} not found.`);
+    }
+
+    const numAmount = Number(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      throw new Error('Settlement amount must be greater than ₹0.');
+    }
+
     const now = new Date();
     const resolvedDate = paymentDate || now.toISOString().split('T')[0];
     const resolvedTime = paymentTime || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const newRepayment: RepaymentRecord = {
       id: `rep-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      amount,
+      amount: numAmount,
       paymentDate: resolvedDate,
       paymentTime: resolvedTime,
       notes,
@@ -1050,112 +1158,140 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       createdAt: now.toISOString(),
     };
 
-    setCreditDebtRecords((prev) =>
-      prev.map((record) => {
-        if (record.id !== id) return record;
+    const newSettled = Math.min(targetRecord.originalAmount, targetRecord.settledAmount + numAmount);
+    const remaining = Math.max(0, targetRecord.originalAmount - newSettled);
+    const dueStatus = getDueStatus(targetRecord.dueDate);
 
-        const newSettled = Math.min(record.originalAmount, record.settledAmount + amount);
-        const remaining = Math.max(0, record.originalAmount - newSettled);
-        const dueStatus = getDueStatus(record.dueDate);
+    let status = targetRecord.status;
+    if (remaining <= 0) {
+      status = 'settled';
+    } else if (dueStatus.isOverdue) {
+      status = 'overdue';
+    } else {
+      status = 'partial';
+    }
 
-        let status = record.status;
-        if (remaining <= 0) {
-          status = 'settled';
-        } else if (dueStatus.isOverdue) {
-          status = 'overdue';
-        } else {
-          status = 'partial';
+    const existingRepayments = targetRecord.repayments || [];
+    const finalRec: CreditDebtRecord = {
+      ...targetRecord,
+      settledAmount: newSettled,
+      remainingAmount: remaining,
+      status,
+      repayments: [newRepayment, ...existingRepayments],
+      updatedAt: now.toISOString(),
+    };
+
+    if (user?.id) {
+      const res = await cloudSaveKhataRecord(user.id, finalRec);
+      if (!res.success) {
+        logDbOperation('khata_transactions', 'upsert', user.id, false, res.error);
+        if (res.error?.code === '42501') {
+          throw new Error(`Database Error [42501]: Permission denied on table 'khata_transactions'. Run the SQL setup script in Supabase.`);
         }
+        throw new Error(res.error?.message || 'Failed to save payment settlement to database');
+      }
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
 
-        const existingRepayments = record.repayments || [];
-        const finalRec: CreditDebtRecord = {
-          ...record,
-          settledAmount: newSettled,
-          remainingAmount: remaining,
-          status,
-          repayments: [newRepayment, ...existingRepayments],
-          updatedAt: now.toISOString(),
-        };
+    setCreditDebtRecords((prev) => prev.map((r) => (r.id === id ? finalRec : r)));
+    return { success: true };
+  }, [user, creditDebtRecords]);
 
-        if (user) {
-          enqueueSyncItem(user.id, 'khata', id, 'upsert', finalRec);
-          setLastSyncedAt(new Date().toLocaleTimeString());
-        }
-
-        return finalRec;
-      })
-    );
-  }, [user]);
-
-  const updateCreditDebtAttachments = useCallback((id: string, newAttachments: Attachment[]) => {
+  const updateCreditDebtAttachments = useCallback(async (id: string, newAttachments: Attachment[]): Promise<void> => {
+    let updatedRec: CreditDebtRecord | undefined;
     setCreditDebtRecords((prev) =>
       prev.map((rec) => {
         if (rec.id !== id) return rec;
-        const updated = { ...rec, attachments: newAttachments, updatedAt: new Date().toISOString() };
-        if (user) {
-          enqueueSyncItem(user.id, 'khata', id, 'upsert', updated);
-          setLastSyncedAt(new Date().toLocaleTimeString());
-        }
-        return updated;
+        updatedRec = { ...rec, attachments: newAttachments, updatedAt: new Date().toISOString() };
+        return updatedRec;
       })
     );
+
+    if (updatedRec && user?.id) {
+      const res = await cloudSaveKhataRecord(user.id, updatedRec);
+      if (!res.success) {
+        logDbOperation('khata_transactions', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to update attachments in database');
+      }
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
     setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, attachments: newAttachments } as CreditDebtRecord) : prev));
   }, [user]);
 
-  const deleteCreditDebt = useCallback((id: string) => {
-    setCreditDebtRecords((prev) => prev.filter((rec) => rec.id !== id));
-    if (user) {
-      enqueueSyncItem(user.id, 'khata', id, 'delete', { id });
+  const deleteCreditDebt = useCallback(async (id: string): Promise<{ success: boolean; error?: string }> => {
+    if (user?.id) {
+      const res = await cloudDeleteKhataRecord(user.id, id);
+      if (!res.success) {
+        logDbOperation('khata_transactions', 'delete', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to delete Khata record from database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
+    setCreditDebtRecords((prev) => prev.filter((rec) => rec.id !== id));
+    return { success: true };
   }, [user]);
 
   // Multi-Account Actions
-  const addAccount = useCallback((data: Omit<Account, 'id' | 'currentBalance' | 'createdAt'>) => {
+  const addAccount = useCallback(async (data: Omit<Account, 'id' | 'currentBalance' | 'createdAt'>): Promise<Account> => {
     const newAcc: Account = {
       ...data,
       id: `acc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       currentBalance: data.openingBalance || 0,
       createdAt: new Date().toISOString(),
     };
-    setAccounts((prev) => [...prev, newAcc]);
-    if (user) {
-      enqueueSyncItem(user.id, 'account', newAcc.id, 'upsert', newAcc);
+    if (user?.id) {
+      const res = await cloudSaveAccount(user.id, newAcc);
+      if (!res.success) {
+        logDbOperation('accounts', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to save account to database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
+    setAccounts((prev) => [...prev, newAcc]);
     return newAcc;
   }, [user]);
 
-  const updateAccount = useCallback((id: string, updates: Partial<Account>) => {
+  const updateAccount = useCallback(async (id: string, updates: Partial<Account>): Promise<void> => {
+    let updatedAcc: Account | undefined;
     setAccounts((prev) =>
       prev.map((a) => {
         if (a.id !== id) return a;
-        const updated = { ...a, ...updates };
-        if (user) {
-          enqueueSyncItem(user.id, 'account', id, 'upsert', updated);
-          setLastSyncedAt(new Date().toLocaleTimeString());
-        }
-        return updated;
+        updatedAcc = { ...a, ...updates };
+        return updatedAcc;
       })
     );
-  }, [user]);
 
-  const deleteAccount = useCallback((id: string) => {
-    setAccounts((prev) => prev.filter((a) => a.id !== id));
-    if (user) {
-      enqueueSyncItem(user.id, 'account', id, 'delete', { id });
+    if (updatedAcc && user?.id) {
+      const res = await cloudSaveAccount(user.id, updatedAcc);
+      if (!res.success) {
+        logDbOperation('accounts', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to update account in database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
   }, [user]);
 
-  const transferBetweenAccounts = useCallback((
+  const deleteAccount = useCallback(async (id: string): Promise<{ success: boolean; error?: string }> => {
+    if (user?.id) {
+      const res = await cloudDeleteAccount(user.id, id);
+      if (!res.success) {
+        logDbOperation('accounts', 'delete', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to delete account from database');
+      }
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
+    setAccounts((prev) => prev.filter((a) => a.id !== id));
+    return { success: true };
+  }, [user]);
+
+  const transferBetweenAccounts = useCallback(async (
     fromAccountId: string,
     toAccountId: string,
     amount: number,
     date?: string,
     time?: string,
     notes?: string
-  ) => {
+  ): Promise<AccountTransfer> => {
     const now = new Date();
     const newTransfer: AccountTransfer = {
       id: `tr-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1168,35 +1304,49 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       createdAt: now.toISOString(),
     };
 
-    setAccountTransfers((prev) => [newTransfer, ...prev]);
-    if (user) {
-      enqueueSyncItem(user.id, 'transfer', newTransfer.id, 'upsert', newTransfer);
+    if (user?.id) {
+      const res = await cloudSaveTransfer(user.id, newTransfer);
+      if (!res.success) {
+        logDbOperation('account_transfers', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to save account transfer to database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
+
+    setAccountTransfers((prev) => [newTransfer, ...prev]);
     return newTransfer;
   }, [user]);
 
   // Person Actions
-  const updatePerson = useCallback((id: string, updates: Partial<Person>) => {
+  const updatePerson = useCallback(async (id: string, updates: Partial<Person>): Promise<void> => {
+    let updatedPerson: Person | undefined;
     setPeople((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
-        const updated = { ...p, ...updates };
-        if (user) {
-          enqueueSyncItem(user.id, 'person', id, 'upsert', updated);
-          setLastSyncedAt(new Date().toLocaleTimeString());
-        }
-        return updated;
+        updatedPerson = { ...p, ...updates };
+        return updatedPerson;
       })
     );
+
+    if (updatedPerson && user?.id) {
+      const res = await cloudSavePerson(user.id, updatedPerson);
+      if (!res.success) {
+        logDbOperation('khata_people', 'upsert', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to update person in database');
+      }
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
   }, [user]);
 
-  const addPerson = useCallback((data: Omit<Person, 'id' | 'createdAt'>) => {
+  const addPerson = useCallback(async (data: Omit<Person, 'id' | 'createdAt'>): Promise<Person> => {
     const cleanName = data.name.trim();
+    if (!cleanName) {
+      throw new Error('Please enter a name for the person or customer.');
+    }
     const existing = people.find((p) => p.name.trim().toLowerCase() === cleanName.toLowerCase());
     if (existing) {
       if (data.phone && !existing.phone) {
-        updatePerson(existing.id, { phone: data.phone });
+        await updatePerson(existing.id, { phone: data.phone });
       }
       return existing;
     }
@@ -1207,28 +1357,42 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       id: `person-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       createdAt: new Date().toISOString(),
     };
-    setPeople((prev) => [...prev, newPerson]);
-    if (user) {
-      enqueueSyncItem(user.id, 'person', newPerson.id, 'upsert', newPerson);
+
+    if (user?.id) {
+      const res = await cloudSavePerson(user.id, newPerson);
+      if (!res.success) {
+        logDbOperation('khata_people', 'upsert', user.id, false, res.error);
+        if (res.error?.code === '42501') {
+          throw new Error(`Database Error [42501]: Permission denied on table 'khata_people'. Run the SQL setup script in Supabase.`);
+        }
+        throw new Error(res.error?.message || 'Failed to save customer to database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
+
+    setPeople((prev) => [...prev, newPerson]);
     return newPerson;
   }, [people, user, updatePerson]);
 
-  const deletePerson = useCallback((id: string) => {
-    setPeople((prev) => prev.filter((p) => p.id !== id));
-    if (user) {
-      enqueueSyncItem(user.id, 'person', id, 'delete', { id });
+  const deletePerson = useCallback(async (id: string): Promise<{ success: boolean; error?: string }> => {
+    if (user?.id) {
+      const res = await cloudDeletePerson(user.id, id);
+      if (!res.success) {
+        logDbOperation('khata_people', 'delete', user.id, false, res.error);
+        throw new Error(res.error?.message || 'Failed to delete customer from database');
+      }
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
+    setPeople((prev) => prev.filter((p) => p.id !== id));
+    return { success: true };
   }, [user]);
 
-  const archivePerson = useCallback((id: string) => {
-    updatePerson(id, { isArchived: true });
+  const archivePerson = useCallback(async (id: string): Promise<void> => {
+    await updatePerson(id, { isArchived: true });
   }, [updatePerson]);
 
-  const unarchivePerson = useCallback((id: string) => {
-    updatePerson(id, { isArchived: false });
+  const unarchivePerson = useCallback(async (id: string): Promise<void> => {
+    await updatePerson(id, { isArchived: false });
   }, [updatePerson]);
 
   // Smart Messaging & Reminder Log Actions
@@ -1246,8 +1410,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return updated;
       });
 
-      if (user) {
-        enqueueSyncItem(user.id, 'message', newRecord.id, 'upsert', newRecord);
+      if (user?.id) {
+        cloudSaveMessage(user.id, newRecord).catch(console.warn);
         setLastSyncedAt(new Date().toLocaleTimeString());
       }
 
@@ -1263,8 +1427,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         storage.setItem(STORAGE_KEYS.MESSAGE_HISTORY, JSON.stringify(updated));
         return updated;
       });
-      if (user) {
-        enqueueSyncItem(user.id, 'message', id, 'delete', { id });
+      if (user?.id) {
+        cloudDeleteMessage(user.id, id).catch(console.warn);
         setLastSyncedAt(new Date().toLocaleTimeString());
       }
     },
@@ -1340,7 +1504,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             categoryBudgets: { [categoryId]: amount },
             createdAt: new Date().toISOString(),
           };
-      enqueueSyncItem(user.id, 'budget', updated.id, 'upsert', updated);
+      cloudSaveBudget(user.id, updated).catch(console.warn);
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
   }, [user, budgets]);
@@ -1360,7 +1524,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           };
 
       if (user?.id) {
-        enqueueSyncItem(user.id, 'budget', updated.id, 'upsert', updated);
+        cloudSaveBudget(user.id, updated).catch(console.warn);
         setLastSyncedAt(new Date().toLocaleTimeString());
       }
 
@@ -1473,41 +1637,49 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [recurringTransactions, addTransaction, updateRecurringTransaction]);
 
   // Unified Quick Add
-  const quickAdd = useCallback((payload: QuickAddPayload) => {
-    if (payload.mode === 'income' || payload.mode === 'expense') {
-      addTransaction({
-        title: payload.title,
-        amount: payload.amount,
-        type: payload.mode,
-        categoryId: payload.categoryId || (payload.mode === 'income' ? 'cat-inc-1' : 'cat-exp-1'),
-        accountId: payload.accountId,
-        paymentMethod: payload.paymentMethod || 'upi',
-        transactionDate: payload.date,
-        transactionTime: payload.time,
-        description: payload.description,
-        attachments: payload.attachments,
-      });
-    } else if (payload.mode === 'credit' || payload.mode === 'debt') {
-      const createdRecord = addCreditDebt({
-        type: payload.mode,
-        counterpartName: payload.counterpartName || payload.title,
-        counterpartPhone: payload.counterpartPhone,
-        personId: payload.personId,
-        originalAmount: payload.amount,
-        settledAmount: 0,
-        status: 'pending',
-        transactionDate: payload.date,
-        transactionTime: payload.time,
-        dueDate: payload.dueDate,
-        notes: payload.description,
-        attachments: payload.attachments,
-        repayments: [],
-      });
+  const quickAdd = useCallback(async (payload: QuickAddPayload): Promise<{ success: boolean; error?: string }> => {
+    try {
+      if (payload.mode === 'income' || payload.mode === 'expense') {
+        await addTransaction({
+          title: payload.title,
+          amount: payload.amount,
+          type: payload.mode,
+          categoryId: payload.categoryId || (payload.mode === 'income' ? 'cat-inc-1' : 'cat-exp-1'),
+          accountId: payload.accountId,
+          paymentMethod: payload.paymentMethod || 'upi',
+          transactionDate: payload.date,
+          transactionTime: payload.time,
+          description: payload.description,
+          attachments: payload.attachments,
+        });
+        return { success: true };
+      } else if (payload.mode === 'credit' || payload.mode === 'debt') {
+        const createdRecord = await addCreditDebt({
+          type: payload.mode,
+          counterpartName: payload.counterpartName || payload.title,
+          counterpartPhone: payload.counterpartPhone,
+          personId: payload.personId,
+          originalAmount: payload.amount,
+          settledAmount: 0,
+          status: 'pending',
+          transactionDate: payload.date,
+          transactionTime: payload.time,
+          dueDate: payload.dueDate,
+          notes: payload.description,
+          attachments: payload.attachments,
+          repayments: [],
+        });
 
-      // Automatically open reminder modal so user can immediately send WhatsApp/SMS
-      setTimeout(() => {
-        openReminderModal(createdRecord);
-      }, 250);
+        // Automatically open reminder modal so user can immediately send WhatsApp/SMS
+        setTimeout(() => {
+          openReminderModal(createdRecord);
+        }, 250);
+        return { success: true };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('[quickAdd Error]', err);
+      return { success: false, error: err.message || 'Operation failed' };
     }
   }, [addTransaction, addCreditDebt, openReminderModal]);
 

@@ -52,9 +52,13 @@ export const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = (
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            deleteTransaction(transaction.id);
-            onClose();
+          onPress: async () => {
+            try {
+              await deleteTransaction(transaction.id);
+              onClose();
+            } catch (err: any) {
+              Alert.alert('Delete Failed', err.message || 'Could not delete transaction from database.');
+            }
           },
         },
       ]

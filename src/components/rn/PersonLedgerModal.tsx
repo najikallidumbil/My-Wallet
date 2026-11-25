@@ -120,17 +120,21 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
   const isPay = personSummary.netBalance < 0;
 
   // Save edited person info
-  const handleSavePersonEdit = () => {
+  const handleSavePersonEdit = async () => {
     if (!editName.trim()) {
       Alert.alert('Required Field', 'Name cannot be empty.');
       return;
     }
-    updatePerson(personSummary.id, {
-      name: editName.trim(),
-      phone: editPhone.trim() || undefined,
-    });
-    setIsEditingPerson(false);
-    Alert.alert('Updated', 'Contact information saved.');
+    try {
+      await updatePerson(personSummary.id, {
+        name: editName.trim(),
+        phone: editPhone.trim() || undefined,
+      });
+      setIsEditingPerson(false);
+      Alert.alert('Updated', 'Contact information saved.');
+    } catch (err: any) {
+      Alert.alert('Update Failed', err.message || 'Failed to update contact.');
+    }
   };
 
   // Safe delete with validation
@@ -153,9 +157,13 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            deletePerson(personSummary.id);
-            onClose();
+          onPress: async () => {
+            try {
+              await deletePerson(personSummary.id);
+              onClose();
+            } catch (err: any) {
+              Alert.alert('Delete Failed', err.message || 'Failed to delete contact from database.');
+            }
           },
         },
       ]
@@ -163,7 +171,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
   };
 
   // Confirm partial or full settlement
-  const handleConfirmSettle = (record: CreditDebtRecord) => {
+  const handleConfirmSettle = async (record: CreditDebtRecord) => {
     const num = parseFloat(settleAmount);
     if (isNaN(num) || num <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
@@ -181,19 +189,23 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
     const now = new Date();
     const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-    settleCreditDebt(
-      record.id,
-      num,
-      [],
-      settleNotes.trim() || undefined,
-      today,
-      time
-    );
+    try {
+      await settleCreditDebt(
+        record.id,
+        num,
+        [],
+        settleNotes.trim() || undefined,
+        today,
+        time
+      );
 
-    setSettlingRecordId(null);
-    setSettleAmount('');
-    setSettleNotes('');
-    Alert.alert('Payment Recorded', `Successfully recorded payment of ${formatRupees(num)}.`);
+      setSettlingRecordId(null);
+      setSettleAmount('');
+      setSettleNotes('');
+      Alert.alert('Payment Recorded', `Successfully recorded payment of ${formatRupees(num)}.`);
+    } catch (err: any) {
+      Alert.alert('Settlement Failed', err.message || 'Failed to record payment in database.');
+    }
   };
 
   return (

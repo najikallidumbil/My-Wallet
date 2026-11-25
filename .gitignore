@@ -31,3 +31,4 @@ dist-ssr
 .expo/
 dist_expo/
 dist_test/
+scratch/

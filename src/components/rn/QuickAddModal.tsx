@@ -9,6 +9,7 @@ import {
   TextInput,
   Image,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import {
   X,
@@ -87,6 +88,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [date, setDate] = useState(todayStr);
   const [time, setTime] = useState(timeStr);
   const [dueDate, setDueDate] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Synchronize state when modal is opened or initialMode changes
   useEffect(() => {
@@ -299,85 +301,106 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount greater than ₹0.');
       return;
     }
 
-    if (mode === 'income' || mode === 'expense') {
-      const cleanTitle = title.trim();
-      if (!cleanTitle) {
-        Alert.alert(
-          'Required Field',
-          mode === 'income'
-            ? 'Please enter an income source / title.'
-            : 'Please enter a transaction title.'
-        );
-        return;
-      }
+    setIsSubmitting(true);
+    try {
+      if (mode === 'income' || mode === 'expense') {
+        const cleanTitle = title.trim();
+        if (!cleanTitle) {
+          Alert.alert(
+            'Required Field',
+            mode === 'income'
+              ? 'Please enter an income source / title.'
+              : 'Please enter a transaction title.'
+          );
+          return;
+        }
 
-      quickAdd({
-        mode,
-        title: cleanTitle,
-        amount: numAmount,
-        categoryId: categoryId || availableCategories[0]?.id || (mode === 'income' ? 'cat-inc-1' : 'cat-exp-1'),
-        accountId: accountId || accounts[0]?.id || 'acc-cash',
-        date,
-        time,
-        description: notes.trim(),
-        attachments,
-      });
-    } else {
-      // Credit or Debt (Khata)
-      const cleanName = personName.trim();
-      if (!cleanName) {
-        Alert.alert('Required Field', 'Please enter or select the person\'s name.');
-        return;
-      }
+        const res = await quickAdd({
+          mode,
+          title: cleanTitle,
+          amount: numAmount,
+          categoryId: categoryId || availableCategories[0]?.id || (mode === 'income' ? 'cat-inc-1' : 'cat-exp-1'),
+          accountId: accountId || accounts[0]?.id || 'acc-cash',
+          date,
+          time,
+          description: notes.trim(),
+          attachments,
+        });
 
-      // Check if person exists in people (either by selected ID or case-insensitive name match)
-      let matchedPerson =
-        (selectedPersonId ? people.find((p) => p.id === selectedPersonId) : undefined) ||
-        people.find((p) => p.name.trim().toLowerCase() === cleanName.toLowerCase());
-
-      let resolvedPersonId: string;
-      let counterpartName = cleanName;
-      let counterpartPhone = personPhone.trim();
-
-      if (matchedPerson) {
-        resolvedPersonId = matchedPerson.id;
-        counterpartName = matchedPerson.name;
-        if (!counterpartPhone && matchedPerson.phone) {
-          counterpartPhone = matchedPerson.phone;
+        if (res && !res.success) {
+          Alert.alert('Database Save Error', res.error || 'Failed to save transaction to database.');
+          return;
         }
       } else {
-        // Automatically create new person record
-        const createdPerson = addPerson({
-          name: cleanName,
-          phone: counterpartPhone || undefined,
+        // Credit or Debt (Khata)
+        const cleanName = personName.trim();
+        if (!cleanName) {
+          Alert.alert('Required Field', 'Please enter or select the person\'s name.');
+          return;
+        }
+
+        // Check if person exists in people (either by selected ID or case-insensitive name match)
+        let matchedPerson =
+          (selectedPersonId ? people.find((p) => p.id === selectedPersonId) : undefined) ||
+          people.find((p) => p.name.trim().toLowerCase() === cleanName.toLowerCase());
+
+        let resolvedPersonId: string;
+        let counterpartName = cleanName;
+        let counterpartPhone = personPhone.trim();
+
+        if (matchedPerson) {
+          resolvedPersonId = matchedPerson.id;
+          counterpartName = matchedPerson.name;
+          if (!counterpartPhone && matchedPerson.phone) {
+            counterpartPhone = matchedPerson.phone;
+          }
+        } else {
+          // Automatically create new person record
+          const createdPerson = await addPerson({
+            name: cleanName,
+            phone: counterpartPhone || undefined,
+          });
+          resolvedPersonId = createdPerson.id;
+          counterpartName = createdPerson.name;
+        }
+
+        const res = await quickAdd({
+          mode,
+          title: counterpartName,
+          counterpartName,
+          counterpartPhone: counterpartPhone || undefined,
+          personId: resolvedPersonId,
+          amount: numAmount,
+          date,
+          time,
+          dueDate: dueDate.trim() || undefined,
+          description: notes.trim(),
+          attachments,
         });
-        resolvedPersonId = createdPerson.id;
-        counterpartName = createdPerson.name;
+
+        if (res && !res.success) {
+          Alert.alert('Database Save Error', res.error || 'Failed to save Khata record to database.');
+          return;
+        }
       }
 
-      quickAdd({
-        mode,
-        title: counterpartName,
-        counterpartName,
-        counterpartPhone: counterpartPhone || undefined,
-        personId: resolvedPersonId,
-        amount: numAmount,
-        date,
-        time,
-        dueDate: dueDate.trim() || undefined,
-        description: notes.trim(),
-        attachments,
-      });
+      onClose();
+    } catch (err: any) {
+      console.error('[QuickAdd Submit Error]', err);
+      Alert.alert(
+        'Database Save Failed',
+        err.message || 'Could not save record to database. Please check Supabase setup and try again.'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
-
-    onClose();
   };
 
   const getModalTitle = () => {
@@ -839,14 +862,22 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
               mode === 'income' && styles.submitBtnIncome,
               mode === 'credit' && styles.submitBtnCredit,
               mode === 'debt' && styles.submitBtnDebt,
+              isSubmitting && { opacity: 0.7 },
             ]}
             onPress={handleSubmit}
+            disabled={isSubmitting}
             activeOpacity={0.8}
           >
-            <Check size={18} color={colors.white} />
-            <Text style={styles.submitBtnText}>
-              Save {mode === 'credit' ? 'Credit Entry' : mode === 'debt' ? 'Debt Entry' : 'Transaction'}
-            </Text>
+            {isSubmitting ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <>
+                <Check size={18} color={colors.white} />
+                <Text style={styles.submitBtnText}>
+                  Save {mode === 'credit' ? 'Credit Entry' : mode === 'debt' ? 'Debt Entry' : 'Transaction'}
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </View>

@@ -45,6 +45,40 @@ export interface CloudFetchResult {
   queryErrors: string[];
 }
 
+export interface CloudOperationResult<T = any> {
+  success: boolean;
+  data?: T;
+  error?: {
+    table: string;
+    operation: 'insert' | 'update' | 'upsert' | 'delete' | 'select';
+    code?: string;
+    message: string;
+    details?: string;
+  };
+}
+
+export function logDbOperation(
+  table: string,
+  operation: 'insert' | 'update' | 'upsert' | 'delete' | 'select',
+  userId: string,
+  success: boolean,
+  error?: { code?: string; message: string; details?: string }
+) {
+  if (success) {
+    console.log(
+      `[Supabase DB Success] Operation: ${operation.toUpperCase()} | Table: ${table} | User: ${userId}`
+    );
+  } else {
+    console.error(
+      `[Supabase DB ERROR] Operation: ${operation.toUpperCase()} | Table: ${table} | User: ${userId} | Code: ${
+        error?.code || 'UNKNOWN'
+      } | Message: ${error?.message || 'Unknown error'}${
+        error?.details ? ` | Details: ${error.details}` : ''
+      }`
+    );
+  }
+}
+
 // Fetch all user data from Supabase with safe error isolation
 export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetchResult | null> {
   const client = getSupabaseClient() as any;
@@ -77,11 +111,50 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       client.from('message_history').select('*').eq('user_id', userId).catch(() => ({ data: [] })),
     ]);
 
-    if (transactionsRes.error) queryErrors.push(`transactions: ${transactionsRes.error.message}`);
-    if (khataRes.error) queryErrors.push(`khata_transactions: ${khataRes.error.message}`);
-    if (peopleRes.error) queryErrors.push(`khata_people: ${peopleRes.error.message}`);
-    if (accountsRes.error) queryErrors.push(`accounts: ${accountsRes.error.message}`);
-    if (budgetsRes.error) queryErrors.push(`budgets: ${budgetsRes.error.message}`);
+    if (transactionsRes.error) {
+      logDbOperation('transactions', 'select', userId, false, transactionsRes.error);
+      queryErrors.push(`transactions: [${transactionsRes.error.code}] ${transactionsRes.error.message}`);
+    } else {
+      logDbOperation('transactions', 'select', userId, true);
+    }
+
+    if (khataRes.error) {
+      logDbOperation('khata_transactions', 'select', userId, false, khataRes.error);
+      queryErrors.push(`khata_transactions: [${khataRes.error.code}] ${khataRes.error.message}`);
+    } else {
+      logDbOperation('khata_transactions', 'select', userId, true);
+    }
+
+    if (peopleRes.error) {
+      logDbOperation('khata_people', 'select', userId, false, peopleRes.error);
+      queryErrors.push(`khata_people: [${peopleRes.error.code}] ${peopleRes.error.message}`);
+    } else {
+      logDbOperation('khata_people', 'select', userId, true);
+    }
+
+    if (accountsRes.error) {
+      logDbOperation('accounts', 'select', userId, false, accountsRes.error);
+      queryErrors.push(`accounts: [${accountsRes.error.code}] ${accountsRes.error.message}`);
+    } else {
+      logDbOperation('accounts', 'select', userId, true);
+    }
+
+    if (budgetsRes.error) {
+      logDbOperation('budgets', 'select', userId, false, budgetsRes.error);
+      queryErrors.push(`budgets: [${budgetsRes.error.code}] ${budgetsRes.error.message}`);
+    } else {
+      logDbOperation('budgets', 'select', userId, true);
+    }
+
+    if (transfersRes.error) {
+      logDbOperation('account_transfers', 'select', userId, false, transfersRes.error);
+      queryErrors.push(`account_transfers: [${transfersRes.error.code}] ${transfersRes.error.message}`);
+    }
+
+    if (categoriesRes.error) {
+      logDbOperation('categories', 'select', userId, false, categoriesRes.error);
+      queryErrors.push(`categories: [${categoriesRes.error.code}] ${categoriesRes.error.message}`);
+    }
 
     const hasTransactions = Boolean(transactionsRes.data && transactionsRes.data.length > 0);
     const hasKhata = Boolean(khataRes.data && khataRes.data.length > 0);
@@ -270,12 +343,17 @@ export async function syncAllDataToCloud(
     let syncedCount = 0;
 
     // 1. User Settings
-    await client.from('user_settings').upsert({
+    const { error: settingsErr } = await client.from('user_settings').upsert({
       user_id: userId,
       opening_balance: payload.openingBalance,
       reminder_prefs: payload.reminderPreferences as any,
       last_synced_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
+    if (settingsErr) {
+      logDbOperation('user_settings', 'upsert', userId, false, settingsErr);
+      throw new Error(`user_settings: [${settingsErr.code}] ${settingsErr.message}`);
+    }
+    logDbOperation('user_settings', 'upsert', userId, true);
     syncedCount++;
 
     // 2. Accounts
@@ -292,7 +370,12 @@ export async function syncAllDataToCloud(
         icon: a.icon || null,
         is_default: a.isDefault || false,
       }));
-      await client.from('accounts').upsert(rows, { onConflict: 'id' });
+      const { error: accErr } = await client.from('accounts').upsert(rows, { onConflict: 'id' });
+      if (accErr) {
+        logDbOperation('accounts', 'upsert', userId, false, accErr);
+        throw new Error(`accounts: [${accErr.code}] ${accErr.message}`);
+      }
+      logDbOperation('accounts', 'upsert', userId, true);
       syncedCount += rows.length;
     }
 
@@ -308,7 +391,12 @@ export async function syncAllDataToCloud(
         transfer_time: t.time || '12:00',
         notes: t.notes || null,
       }));
-      await client.from('account_transfers').upsert(rows, { onConflict: 'id' });
+      const { error: trErr } = await client.from('account_transfers').upsert(rows, { onConflict: 'id' });
+      if (trErr) {
+        logDbOperation('account_transfers', 'upsert', userId, false, trErr);
+        throw new Error(`account_transfers: [${trErr.code}] ${trErr.message}`);
+      }
+      logDbOperation('account_transfers', 'upsert', userId, true);
       syncedCount += rows.length;
     }
 
@@ -325,7 +413,12 @@ export async function syncAllDataToCloud(
         is_default: false,
         budget: c.budget || 0,
       }));
-      await client.from('categories').upsert(rows, { onConflict: 'id' });
+      const { error: catErr } = await client.from('categories').upsert(rows, { onConflict: 'id' });
+      if (catErr) {
+        logDbOperation('categories', 'upsert', userId, false, catErr);
+        throw new Error(`categories: [${catErr.code}] ${catErr.message}`);
+      }
+      logDbOperation('categories', 'upsert', userId, true);
       syncedCount += rows.length;
     }
 
@@ -339,7 +432,12 @@ export async function syncAllDataToCloud(
         email: p.email || null,
         notes: p.notes || null,
       }));
-      await client.from('khata_people').upsert(rows, { onConflict: 'id' });
+      const { error: pErr } = await client.from('khata_people').upsert(rows, { onConflict: 'id' });
+      if (pErr) {
+        logDbOperation('khata_people', 'upsert', userId, false, pErr);
+        throw new Error(`khata_people: [${pErr.code}] ${pErr.message}`);
+      }
+      logDbOperation('khata_people', 'upsert', userId, true);
       syncedCount += rows.length;
     }
 
@@ -362,7 +460,12 @@ export async function syncAllDataToCloud(
         notes: k.notes || null,
         repayments: (k.repayments || []) as any,
       }));
-      await client.from('khata_transactions').upsert(rows, { onConflict: 'id' });
+      const { error: kErr } = await client.from('khata_transactions').upsert(rows, { onConflict: 'id' });
+      if (kErr) {
+        logDbOperation('khata_transactions', 'upsert', userId, false, kErr);
+        throw new Error(`khata_transactions: [${kErr.code}] ${kErr.message}`);
+      }
+      logDbOperation('khata_transactions', 'upsert', userId, true);
       syncedCount += rows.length;
     }
 
@@ -386,7 +489,12 @@ export async function syncAllDataToCloud(
         recurring_id: t.recurringId || null,
         attachments: (t.attachments || []) as any,
       }));
-      await client.from('transactions').upsert(rows, { onConflict: 'id' });
+      const { error: txErr } = await client.from('transactions').upsert(rows, { onConflict: 'id' });
+      if (txErr) {
+        logDbOperation('transactions', 'upsert', userId, false, txErr);
+        throw new Error(`transactions: [${txErr.code}] ${txErr.message}`);
+      }
+      logDbOperation('transactions', 'upsert', userId, true);
       syncedCount += rows.length;
     }
 
@@ -400,154 +508,363 @@ export async function syncAllDataToCloud(
         category_budgets: (b.categoryBudgets || {}) as any,
         subcategory_budgets: (b.subcategoryBudgets || {}) as any,
       }));
-      await client.from('budgets').upsert(rows, { onConflict: 'user_id,month' });
+      const { error: bErr } = await client.from('budgets').upsert(rows, { onConflict: 'user_id,month' });
+      if (bErr) {
+        logDbOperation('budgets', 'upsert', userId, false, bErr);
+        throw new Error(`budgets: [${bErr.code}] ${bErr.message}`);
+      }
+      logDbOperation('budgets', 'upsert', userId, true);
       syncedCount += rows.length;
     }
 
     return { success: true, syncedItemsCount: syncedCount };
   } catch (err: any) {
-    console.warn('syncAllDataToCloud error:', err);
+    console.error('syncAllDataToCloud error:', err);
     return { success: false, syncedItemsCount: 0, error: err.message || 'Cloud sync failed' };
   }
 }
 
-// Single-record sync handlers
-export async function syncTransactionItem(
+// ==============================================================================
+// DIRECT CLOUD CRUD FUNCTIONS WITH STRICT DATABASE AWAIT & ERROR HANDLING
+// ==============================================================================
+
+export async function cloudSavePerson(
   userId: string,
-  tx: Transaction,
-  action: 'upsert' | 'delete'
-): Promise<void> {
+  person: Person
+): Promise<CloudOperationResult<Person>> {
   const client = getSupabaseClient() as any;
-  if (!client) return;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'khata_people', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
 
   try {
-    if (action === 'delete') {
-      await client.from('transactions').delete().eq('id', tx.id).eq('user_id', userId);
-    } else {
-      await client.from('transactions').upsert({
-        id: tx.id,
-        user_id: userId,
-        category_id: tx.categoryId || null,
-        subcategory_id: tx.subcategoryId || null,
-        subcategory_name: tx.subcategoryName || null,
-        account_id: tx.accountId || null,
-        amount: tx.amount,
-        type: tx.type,
-        payment_method: tx.paymentMethod,
-        title: tx.title,
-        description: tx.description || null,
-        transaction_date: tx.transactionDate,
-        transaction_time: tx.transactionTime || '12:00',
-        is_recurring: tx.isRecurring || false,
-        recurring_id: tx.recurringId || null,
-        attachments: (tx.attachments || []) as any,
-      }, { onConflict: 'id' });
+    const row = {
+      id: person.id,
+      user_id: userId,
+      name: person.name.trim(),
+      phone: person.phone || null,
+      email: person.email || null,
+      notes: person.notes || null,
+    };
+
+    const { error } = await client.from('khata_people').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('khata_people', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'khata_people', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
     }
-  } catch (err) {
-    console.warn('syncTransactionItem error:', err);
+
+    logDbOperation('khata_people', 'upsert', userId, true);
+    return { success: true, data: person };
+  } catch (err: any) {
+    logDbOperation('khata_people', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'khata_people', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
   }
 }
 
-export async function syncKhataItem(
+export async function cloudDeletePerson(
   userId: string,
-  record: CreditDebtRecord,
-  action: 'upsert' | 'delete'
-): Promise<void> {
+  personId: string
+): Promise<CloudOperationResult<null>> {
   const client = getSupabaseClient() as any;
-  if (!client) return;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'khata_people', operation: 'delete', message: 'Supabase client unavailable' },
+    };
+  }
 
   try {
-    if (action === 'delete') {
-      await client.from('khata_transactions').delete().eq('id', record.id).eq('user_id', userId);
-    } else {
-      await client.from('khata_transactions').upsert({
-        id: record.id,
-        user_id: userId,
-        person_id: record.personId || null,
-        type: record.type,
-        counterpart_name: record.counterpartName,
-        counterpart_phone: record.counterpartPhone || null,
-        counterpart_email: record.counterpartEmail || null,
-        original_amount: record.originalAmount,
-        settled_amount: record.settledAmount,
-        status: record.status,
-        transaction_date: record.transactionDate,
-        transaction_time: record.transactionTime || '12:00',
-        due_date: record.dueDate || null,
-        notes: record.notes || null,
-        repayments: (record.repayments || []) as any,
-      }, { onConflict: 'id' });
+    const { error } = await client.from('khata_people').delete().eq('id', personId).eq('user_id', userId);
+    if (error) {
+      logDbOperation('khata_people', 'delete', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'khata_people', operation: 'delete', code: error.code, message: error.message, details: error.details },
+      };
     }
-  } catch (err) {
-    console.warn('syncKhataItem error:', err);
+
+    logDbOperation('khata_people', 'delete', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('khata_people', 'delete', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'khata_people', operation: 'delete', message: err.message || 'Unknown network error' },
+    };
   }
 }
 
-export async function syncPersonItem(
+export async function cloudSaveKhataRecord(
   userId: string,
-  person: Person,
-  action: 'upsert' | 'delete'
-): Promise<void> {
+  record: CreditDebtRecord
+): Promise<CloudOperationResult<CreditDebtRecord>> {
   const client = getSupabaseClient() as any;
-  if (!client) return;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'khata_transactions', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
 
   try {
-    if (action === 'delete') {
-      await client.from('khata_people').delete().eq('id', person.id).eq('user_id', userId);
-    } else {
-      await client.from('khata_people').upsert({
-        id: person.id,
-        user_id: userId,
-        name: person.name,
-        phone: person.phone || null,
-        email: person.email || null,
-        notes: person.notes || null,
-      }, { onConflict: 'id' });
+    const row = {
+      id: record.id,
+      user_id: userId,
+      person_id: record.personId || null,
+      type: record.type,
+      counterpart_name: record.counterpartName,
+      counterpart_phone: record.counterpartPhone || null,
+      counterpart_email: record.counterpartEmail || null,
+      original_amount: record.originalAmount,
+      settled_amount: record.settledAmount,
+      status: record.status,
+      transaction_date: record.transactionDate,
+      transaction_time: record.transactionTime || '12:00',
+      due_date: record.dueDate || null,
+      notes: record.notes || null,
+      repayments: (record.repayments || []) as any,
+    };
+
+    const { error } = await client.from('khata_transactions').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('khata_transactions', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'khata_transactions', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
     }
-  } catch (err) {
-    console.warn('syncPersonItem error:', err);
+
+    logDbOperation('khata_transactions', 'upsert', userId, true);
+    return { success: true, data: record };
+  } catch (err: any) {
+    logDbOperation('khata_transactions', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'khata_transactions', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
   }
 }
 
-export async function syncAccountItem(
+export async function cloudDeleteKhataRecord(
   userId: string,
-  account: Account,
-  action: 'upsert' | 'delete'
-): Promise<void> {
+  recordId: string
+): Promise<CloudOperationResult<null>> {
   const client = getSupabaseClient() as any;
-  if (!client) return;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'khata_transactions', operation: 'delete', message: 'Supabase client unavailable' },
+    };
+  }
 
   try {
-    if (action === 'delete') {
-      await client.from('accounts').delete().eq('id', account.id).eq('user_id', userId);
-    } else {
-      await client.from('accounts').upsert({
-        id: account.id,
-        user_id: userId,
-        name: account.name,
-        type: account.type,
-        opening_balance: account.openingBalance,
-        current_balance: account.currentBalance,
-        account_number: account.accountNumber || null,
-        color: account.color || null,
-        icon: account.icon || null,
-        is_default: account.isDefault || false,
-      }, { onConflict: 'id' });
+    const { error } = await client.from('khata_transactions').delete().eq('id', recordId).eq('user_id', userId);
+    if (error) {
+      logDbOperation('khata_transactions', 'delete', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'khata_transactions', operation: 'delete', code: error.code, message: error.message, details: error.details },
+      };
     }
-  } catch (err) {
-    console.warn('syncAccountItem error:', err);
+
+    logDbOperation('khata_transactions', 'delete', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('khata_transactions', 'delete', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'khata_transactions', operation: 'delete', message: err.message || 'Unknown network error' },
+    };
   }
 }
 
-export async function syncTransferItem(
+export async function cloudSaveTransaction(
+  userId: string,
+  tx: Transaction
+): Promise<CloudOperationResult<Transaction>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'transactions', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const row = {
+      id: tx.id,
+      user_id: userId,
+      category_id: tx.categoryId || null,
+      subcategory_id: tx.subcategoryId || null,
+      subcategory_name: tx.subcategoryName || null,
+      account_id: tx.accountId || null,
+      amount: tx.amount,
+      type: tx.type,
+      payment_method: tx.paymentMethod,
+      title: tx.title,
+      description: tx.description || null,
+      transaction_date: tx.transactionDate,
+      transaction_time: tx.transactionTime || '12:00',
+      is_recurring: tx.isRecurring || false,
+      recurring_id: tx.recurringId || null,
+      attachments: (tx.attachments || []) as any,
+    };
+
+    const { error } = await client.from('transactions').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('transactions', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'transactions', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('transactions', 'upsert', userId, true);
+    return { success: true, data: tx };
+  } catch (err: any) {
+    logDbOperation('transactions', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'transactions', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudDeleteTransaction(
+  userId: string,
+  txId: string
+): Promise<CloudOperationResult<null>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'transactions', operation: 'delete', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const { error } = await client.from('transactions').delete().eq('id', txId).eq('user_id', userId);
+    if (error) {
+      logDbOperation('transactions', 'delete', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'transactions', operation: 'delete', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('transactions', 'delete', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('transactions', 'delete', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'transactions', operation: 'delete', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudSaveAccount(
+  userId: string,
+  account: Account
+): Promise<CloudOperationResult<Account>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'accounts', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const row = {
+      id: account.id,
+      user_id: userId,
+      name: account.name,
+      type: account.type,
+      opening_balance: account.openingBalance,
+      current_balance: account.currentBalance,
+      account_number: account.accountNumber || null,
+      color: account.color || null,
+      icon: account.icon || null,
+      is_default: account.isDefault || false,
+    };
+
+    const { error } = await client.from('accounts').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('accounts', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'accounts', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('accounts', 'upsert', userId, true);
+    return { success: true, data: account };
+  } catch (err: any) {
+    logDbOperation('accounts', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'accounts', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudDeleteAccount(
+  userId: string,
+  accountId: string
+): Promise<CloudOperationResult<null>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'accounts', operation: 'delete', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const { error } = await client.from('accounts').delete().eq('id', accountId).eq('user_id', userId);
+    if (error) {
+      logDbOperation('accounts', 'delete', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'accounts', operation: 'delete', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('accounts', 'delete', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('accounts', 'delete', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'accounts', operation: 'delete', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudSaveTransfer(
   userId: string,
   transfer: AccountTransfer
-): Promise<void> {
+): Promise<CloudOperationResult<AccountTransfer>> {
   const client = getSupabaseClient() as any;
-  if (!client) return;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'account_transfers', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
 
   try {
-    await client.from('account_transfers').upsert({
+    const row = {
       id: transfer.id,
       user_id: userId,
       from_account_id: transfer.fromAccountId || null,
@@ -556,9 +873,275 @@ export async function syncTransferItem(
       transfer_date: transfer.date,
       transfer_time: transfer.time || '12:00',
       notes: transfer.notes || null,
-    }, { onConflict: 'id' });
-  } catch (err) {
-    console.warn('syncTransferItem error:', err);
+    };
+
+    const { error } = await client.from('account_transfers').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('account_transfers', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'account_transfers', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('account_transfers', 'upsert', userId, true);
+    return { success: true, data: transfer };
+  } catch (err: any) {
+    logDbOperation('account_transfers', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'account_transfers', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudSaveBudget(
+  userId: string,
+  budget: Budget
+): Promise<CloudOperationResult<Budget>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'budgets', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const budgetId = budget.id.includes(userId) ? budget.id : `budget-${userId}-${budget.month}`;
+    const row = {
+      id: budgetId,
+      user_id: userId,
+      month: budget.month,
+      total_budget: budget.totalBudget || 0,
+      category_budgets: (budget.categoryBudgets || {}) as any,
+      subcategory_budgets: (budget.subcategoryBudgets || {}) as any,
+    };
+
+    const { error } = await client.from('budgets').upsert(row, { onConflict: 'user_id,month' });
+    if (error) {
+      logDbOperation('budgets', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'budgets', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('budgets', 'upsert', userId, true);
+    return { success: true, data: budget };
+  } catch (err: any) {
+    logDbOperation('budgets', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'budgets', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudSaveUserSettings(
+  userId: string,
+  settings: { openingBalance?: number; reminderPreferences?: ReminderPreferences }
+): Promise<CloudOperationResult<null>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'user_settings', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const updateObj: any = {
+      user_id: userId,
+      last_synced_at: new Date().toISOString(),
+    };
+    if (typeof settings.openingBalance === 'number') {
+      updateObj.opening_balance = settings.openingBalance;
+    }
+    if (settings.reminderPreferences) {
+      updateObj.reminder_prefs = settings.reminderPreferences;
+    }
+
+    const { error } = await client.from('user_settings').upsert(updateObj, { onConflict: 'user_id' });
+    if (error) {
+      logDbOperation('user_settings', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'user_settings', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('user_settings', 'upsert', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('user_settings', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'user_settings', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudSaveMessage(
+  userId: string,
+  record: MessageRecord
+): Promise<CloudOperationResult<MessageRecord>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'message_history', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const row = {
+      id: record.id,
+      user_id: userId,
+      person_id: record.personId || null,
+      person_name: record.personName,
+      recipient_phone: record.recipientPhone || null,
+      message_content: record.messageContent,
+      message_type: record.messageType,
+      channel: record.channel,
+      status: record.status,
+      language: record.language || 'en',
+      sent_at: record.sentAt,
+    };
+
+    const { error } = await client.from('message_history').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('message_history', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'message_history', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('message_history', 'upsert', userId, true);
+    return { success: true, data: record };
+  } catch (err: any) {
+    logDbOperation('message_history', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'message_history', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudDeleteMessage(
+  userId: string,
+  messageId: string
+): Promise<CloudOperationResult<null>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'message_history', operation: 'delete', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const { error } = await client.from('message_history').delete().eq('id', messageId).eq('user_id', userId);
+    if (error) {
+      logDbOperation('message_history', 'delete', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'message_history', operation: 'delete', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('message_history', 'delete', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('message_history', 'delete', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'message_history', operation: 'delete', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+// Single-record sync handlers (used by offlineSyncQueue)
+export async function syncTransactionItem(
+  userId: string,
+  tx: Transaction,
+  action: 'upsert' | 'delete'
+): Promise<void> {
+  if (action === 'delete') {
+    const res = await cloudDeleteTransaction(userId, tx.id);
+    if (!res.success) {
+      throw new Error(`[transactions delete] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  } else {
+    const res = await cloudSaveTransaction(userId, tx);
+    if (!res.success) {
+      throw new Error(`[transactions upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  }
+}
+
+export async function syncKhataItem(
+  userId: string,
+  record: CreditDebtRecord,
+  action: 'upsert' | 'delete'
+): Promise<void> {
+  if (action === 'delete') {
+    const res = await cloudDeleteKhataRecord(userId, record.id);
+    if (!res.success) {
+      throw new Error(`[khata_transactions delete] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  } else {
+    const res = await cloudSaveKhataRecord(userId, record);
+    if (!res.success) {
+      throw new Error(`[khata_transactions upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  }
+}
+
+export async function syncPersonItem(
+  userId: string,
+  person: Person,
+  action: 'upsert' | 'delete'
+): Promise<void> {
+  if (action === 'delete') {
+    const res = await cloudDeletePerson(userId, person.id);
+    if (!res.success) {
+      throw new Error(`[khata_people delete] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  } else {
+    const res = await cloudSavePerson(userId, person);
+    if (!res.success) {
+      throw new Error(`[khata_people upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  }
+}
+
+export async function syncAccountItem(
+  userId: string,
+  account: Account,
+  action: 'upsert' | 'delete'
+): Promise<void> {
+  if (action === 'delete') {
+    const res = await cloudDeleteAccount(userId, account.id);
+    if (!res.success) {
+      throw new Error(`[accounts delete] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  } else {
+    const res = await cloudSaveAccount(userId, account);
+    if (!res.success) {
+      throw new Error(`[accounts upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
+  }
+}
+
+export async function syncTransferItem(
+  userId: string,
+  transfer: AccountTransfer
+): Promise<void> {
+  const res = await cloudSaveTransfer(userId, transfer);
+  if (!res.success) {
+    throw new Error(`[account_transfers upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
   }
 }
 
@@ -566,21 +1149,9 @@ export async function syncBudgetItem(
   userId: string,
   budget: Budget
 ): Promise<void> {
-  const client = getSupabaseClient() as any;
-  if (!client) return;
-
-  try {
-    const budgetId = budget.id.includes(userId) ? budget.id : `budget-${userId}-${budget.month}`;
-    await client.from('budgets').upsert({
-      id: budgetId,
-      user_id: userId,
-      month: budget.month,
-      total_budget: budget.totalBudget || 0,
-      category_budgets: (budget.categoryBudgets || {}) as any,
-      subcategory_budgets: (budget.subcategoryBudgets || {}) as any,
-    }, { onConflict: 'user_id,month' });
-  } catch (err) {
-    console.warn('syncBudgetItem error:', err);
+  const res = await cloudSaveBudget(userId, budget);
+  if (!res.success) {
+    throw new Error(`[budgets upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
   }
 }
 
@@ -589,31 +1160,15 @@ export async function syncMessageItem(
   record: MessageRecord,
   action: 'upsert' | 'delete'
 ): Promise<void> {
-  const client = getSupabaseClient() as any;
-  if (!client) return;
-
-  try {
-    if (action === 'delete') {
-      await client.from('message_history').delete().eq('id', record.id).eq('user_id', userId);
-    } else {
-      await client.from('message_history').upsert(
-        {
-          id: record.id,
-          user_id: userId,
-          person_id: record.personId || null,
-          person_name: record.personName,
-          recipient_phone: record.recipientPhone || null,
-          message_content: record.messageContent,
-          message_type: record.messageType,
-          channel: record.channel,
-          status: record.status,
-          language: record.language || 'en',
-          sent_at: record.sentAt,
-        },
-        { onConflict: 'id' }
-      );
+  if (action === 'delete') {
+    const res = await cloudDeleteMessage(userId, record.id);
+    if (!res.success) {
+      throw new Error(`[message_history delete] ${res.error?.message} (${res.error?.code || 'ERR'})`);
     }
-  } catch (err) {
-    console.warn('syncMessageItem notice:', err);
+  } else {
+    const res = await cloudSaveMessage(userId, record);
+    if (!res.success) {
+      throw new Error(`[message_history upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+    }
   }
 }

@@ -49,6 +49,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);
 
   // Phone selection dialog state for contacts with multiple numbers
@@ -129,7 +130,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const cleanName = name.trim();
     if (!cleanName) {
       Alert.alert('Required Field', 'Please enter a name for the person or customer.');
@@ -148,13 +149,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Use Existing Contact',
-            onPress: () => {
-              const saved = addPerson({
-                name: cleanName,
-                phone: cleanPhone,
-              });
-              onPersonAdded?.(saved);
-              handleClose();
+            onPress: async () => {
+              setIsSaving(true);
+              try {
+                const saved = await addPerson({
+                  name: cleanName,
+                  phone: cleanPhone,
+                });
+                onPersonAdded?.(saved);
+                handleClose();
+              } catch (err: any) {
+                Alert.alert('Database Save Error', err.message || 'Failed to link existing contact.');
+              } finally {
+                setIsSaving(false);
+              }
             },
           },
         ]
@@ -162,14 +170,25 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       return;
     }
 
-    const saved = addPerson({
-      name: cleanName,
-      phone: cleanPhone,
-    });
+    setIsSaving(true);
+    try {
+      const saved = await addPerson({
+        name: cleanName,
+        phone: cleanPhone,
+      });
 
-    onPersonAdded?.(saved);
-    handleClose();
-    Alert.alert('Person Added', `"${cleanName}" added to Khata Book.`);
+      onPersonAdded?.(saved);
+      handleClose();
+      Alert.alert('Person Added', `"${cleanName}" saved to Supabase and Khata Book.`);
+    } catch (err: any) {
+      console.error('[AddPerson Error]', err);
+      Alert.alert(
+        'Database Save Failed',
+        err.message || 'Could not save person to database. Please check your Supabase connection and try again.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -290,9 +309,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               </View>
 
               {/* Save Action */}
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSave} activeOpacity={0.8}>
-                <Check size={18} color={colors.white} />
-                <Text style={styles.submitBtnText}>Save Person</Text>
+              <TouchableOpacity
+                style={[styles.submitBtn, isSaving && { opacity: 0.7 }]}
+                onPress={handleSave}
+                disabled={isSaving}
+                activeOpacity={0.8}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <>
+                    <Check size={18} color={colors.white} />
+                    <Text style={styles.submitBtnText}>Save Person</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </View>

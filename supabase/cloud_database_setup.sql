@@ -467,4 +467,8 @@ INSERT INTO public.categories (id, user_id, name, type, icon, color, is_default)
 ON CONFLICT (id) DO NOTHING;
 
 -- Verification Notice
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
+
 SELECT 'Cloud database setup completed successfully with strict multi-user RLS.' AS status;

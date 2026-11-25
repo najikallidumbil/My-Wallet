@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import {
   X,
@@ -45,6 +46,7 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
   const [selectedRecordId, setSelectedRecordId] = useState<string>('');
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const now = new Date();
@@ -100,7 +102,7 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
     return eligiblePeople.find((e) => e.person.id === selectedPersonId);
   }, [eligiblePeople, selectedPersonId]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid payment amount greater than ₹0.');
@@ -120,36 +122,47 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
       return;
     }
 
-    // Allocate payment across the selected record or the oldest pending records
-    let remainingToSettle = numAmount;
-    const recordsToProcess = selectedRecordId
-      ? activePersonData.pendingRecords.filter((r) => r.id === selectedRecordId)
-      : [...activePersonData.pendingRecords].sort((a, b) =>
-          a.transactionDate.localeCompare(b.transactionDate)
+    setIsSubmitting(true);
+    try {
+      // Allocate payment across the selected record or the oldest pending records
+      let remainingToSettle = numAmount;
+      const recordsToProcess = selectedRecordId
+        ? activePersonData.pendingRecords.filter((r) => r.id === selectedRecordId)
+        : [...activePersonData.pendingRecords].sort((a, b) =>
+            a.transactionDate.localeCompare(b.transactionDate)
+          );
+
+      for (const rec of recordsToProcess) {
+        if (remainingToSettle <= 0) break;
+        const amountForRec = Math.min(rec.remainingAmount, remainingToSettle);
+        await settleCreditDebt(
+          rec.id,
+          amountForRec,
+          [],
+          notes.trim() || undefined,
+          date,
+          time
         );
+        remainingToSettle -= amountForRec;
+      }
 
-    for (const rec of recordsToProcess) {
-      if (remainingToSettle <= 0) break;
-      const amountForRec = Math.min(rec.remainingAmount, remainingToSettle);
-      settleCreditDebt(
-        rec.id,
-        amountForRec,
-        [],
-        notes.trim() || undefined,
-        date,
-        time
+      Alert.alert(
+        'Payment Recorded',
+        `Successfully recorded ${mode === 'receive' ? 'received payment' : 'debt repayment'} of ${formatRupees(
+          numAmount
+        )} for ${activePersonData.person.name}.`
       );
-      remainingToSettle -= amountForRec;
+
+      onClose();
+    } catch (err: any) {
+      console.error('[KhataSettle Submit Error]', err);
+      Alert.alert(
+        'Settlement Failed',
+        err.message || 'Could not record payment to database. Please check Supabase setup and try again.'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
-
-    Alert.alert(
-      'Payment Recorded',
-      `Successfully recorded ${mode === 'receive' ? 'received payment' : 'debt repayment'} of ${formatRupees(
-        numAmount
-      )} for ${activePersonData.person.name}.`
-    );
-
-    onClose();
   };
 
   const isReceive = mode === 'receive';
@@ -323,18 +336,26 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
                 style={[
                   styles.submitBtn,
                   isReceive ? styles.btnRec : styles.btnPay,
+                  isSubmitting && { opacity: 0.7 },
                 ]}
                 onPress={handleSubmit}
+                disabled={isSubmitting}
                 activeOpacity={0.8}
               >
-                {isReceive ? (
-                  <ArrowDownLeft size={18} color={colors.white} />
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color={colors.white} />
                 ) : (
-                  <ArrowUpRight size={18} color={colors.white} />
+                  <>
+                    {isReceive ? (
+                      <ArrowDownLeft size={18} color={colors.white} />
+                    ) : (
+                      <ArrowUpRight size={18} color={colors.white} />
+                    )}
+                    <Text style={styles.submitBtnText}>
+                      {isReceive ? 'Confirm Payment Received' : 'Confirm Debt Repaid'}
+                    </Text>
+                  </>
                 )}
-                <Text style={styles.submitBtnText}>
-                  {isReceive ? 'Confirm Payment Received' : 'Confirm Debt Repaid'}
-                </Text>
               </TouchableOpacity>
             </ScrollView>
           )}
