@@ -276,7 +276,7 @@ export function calculateBudgetProgress(
 
   totalBudget = roundToTwoDecimals(totalBudget);
   totalSpent = roundToTwoDecimals(totalSpent);
-  const remainingBudget = roundToTwoDecimals(totalBudget - totalSpent);
+  const remainingBudget = totalBudget > 0 ? roundToTwoDecimals(totalBudget - totalSpent) : 0;
   const percentage = totalBudget > 0 ? roundToTwoDecimals((totalSpent / totalBudget) * 100) : 0;
 
   // Sort by highest percentage spent first
@@ -301,6 +301,17 @@ export function aggregatePersonSummaries(
   people: Person[] = []
 ): PersonSummary[] {
   const map = new Map<string, PersonSummary>();
+  const personDatesMap = new Map<
+    string,
+    {
+      latestTxDate?: string;
+      earliestDueDate?: string;
+      hasOverdue: boolean;
+      allSettled: boolean;
+    }
+  >();
+
+  const todayStr = new Date().toISOString().split('T')[0];
 
   // Seed with known people
   for (const p of people) {
@@ -315,6 +326,11 @@ export function aggregatePersonSummaries(
       outstandingPayable: 0,
       netBalance: 0,
       recordsCount: 0,
+      isArchived: p.isArchived || false,
+    });
+    personDatesMap.set(key, {
+      hasOverdue: false,
+      allSettled: true,
     });
   }
 
@@ -324,6 +340,8 @@ export function aggregatePersonSummaries(
     const key = cleanName.toLowerCase();
 
     let entry = map.get(key);
+    let datesInfo = personDatesMap.get(key);
+
     if (!entry) {
       entry = {
         id: `person-${key.replace(/\s+/g, '-')}`,
@@ -339,8 +357,11 @@ export function aggregatePersonSummaries(
         outstandingPayable: 0,
         netBalance: 0,
         recordsCount: 0,
+        isArchived: false,
       };
       map.set(key, entry);
+      datesInfo = { hasOverdue: false, allSettled: true };
+      personDatesMap.set(key, datesInfo);
     } else {
       if (!entry.phone && record.counterpartPhone) entry.phone = record.counterpartPhone;
       if (!entry.email && record.counterpartEmail) entry.email = record.counterpartEmail;
@@ -348,6 +369,7 @@ export function aggregatePersonSummaries(
 
     entry.recordsCount += 1;
     const settled = record.settledAmount || 0;
+    const remaining = Math.max(0, record.originalAmount - settled);
 
     if (record.type === 'credit') {
       entry.totalGiven += record.originalAmount;
@@ -356,19 +378,59 @@ export function aggregatePersonSummaries(
       entry.totalBorrowed += record.originalAmount;
       entry.totalRepaid += settled;
     }
+
+    // Track dates & overdue
+    const txDate =
+      record.transactionDate || (record.createdAt ? record.createdAt.split('T')[0] : '');
+    if (datesInfo) {
+      if (txDate && (!datesInfo.latestTxDate || txDate > datesInfo.latestTxDate)) {
+        datesInfo.latestTxDate = txDate;
+      }
+
+      if (remaining > 0) {
+        datesInfo.allSettled = false;
+        if (record.dueDate) {
+          if (!datesInfo.earliestDueDate || record.dueDate < datesInfo.earliestDueDate) {
+            datesInfo.earliestDueDate = record.dueDate;
+          }
+          if (record.dueDate < todayStr || record.status === 'overdue') {
+            datesInfo.hasOverdue = true;
+          }
+        }
+      }
+    }
   }
 
   // Calculate final person balances
   const summaries: PersonSummary[] = [];
-  for (const item of map.values()) {
+  for (const [key, item] of map.entries()) {
     item.totalGiven = roundToTwoDecimals(item.totalGiven);
     item.totalReceivedBack = roundToTwoDecimals(item.totalReceivedBack);
     item.totalBorrowed = roundToTwoDecimals(item.totalBorrowed);
     item.totalRepaid = roundToTwoDecimals(item.totalRepaid);
 
-    item.outstandingReceivable = roundToTwoDecimals(Math.max(0, item.totalGiven - item.totalReceivedBack));
-    item.outstandingPayable = roundToTwoDecimals(Math.max(0, item.totalBorrowed - item.totalRepaid));
+    item.outstandingReceivable = roundToTwoDecimals(
+      Math.max(0, item.totalGiven - item.totalReceivedBack)
+    );
+    item.outstandingPayable = roundToTwoDecimals(
+      Math.max(0, item.totalBorrowed - item.totalRepaid)
+    );
     item.netBalance = roundToTwoDecimals(item.outstandingReceivable - item.outstandingPayable);
+
+    const datesInfo = personDatesMap.get(key);
+    item.lastTransactionDate = datesInfo?.latestTxDate;
+    item.nextDueDate = datesInfo?.earliestDueDate;
+    item.hasOverdue = datesInfo?.hasOverdue || false;
+
+    if (item.outstandingReceivable === 0 && item.outstandingPayable === 0) {
+      item.paymentStatus = 'settled';
+    } else if (datesInfo?.hasOverdue) {
+      item.paymentStatus = 'overdue';
+    } else if (item.totalReceivedBack > 0 || item.totalRepaid > 0) {
+      item.paymentStatus = 'partial';
+    } else {
+      item.paymentStatus = 'pending';
+    }
 
     summaries.push(item);
   }

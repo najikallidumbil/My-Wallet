@@ -41,6 +41,8 @@ export interface Person {
   phone?: string;
   email?: string;
   notes?: string;
+  avatarUrl?: string;
+  isArchived?: boolean;
   createdAt: string;
 }
 
@@ -53,7 +55,66 @@ export interface PersonSummary extends Person {
   outstandingPayable: number; // Borrowed - Repaid
   netBalance: number; // Receivable - Payable (positive = they owe me, negative = I owe them)
   recordsCount: number;
+  lastTransactionDate?: string;
+  nextDueDate?: string;
+  paymentStatus?: 'pending' | 'settled' | 'overdue' | 'partial';
+  hasOverdue?: boolean;
 }
+
+export type MessageType =
+  | 'payment_reminder'
+  | 'due_date_reminder'
+  | 'overdue_reminder'
+  | 'payment_received'
+  | 'payment_made'
+  | 'personal';
+
+export type MessageChannel = 'whatsapp' | 'sms' | 'copied';
+
+export type MessageStatus =
+  | 'prepared'
+  | 'opened_in_whatsapp'
+  | 'opened_in_sms'
+  | 'sent'
+  | 'delivered'
+  | 'failed';
+
+export type MessageLanguage = 'en' | 'ml';
+
+export interface MessageRecord {
+  id: string;
+  userId?: string;
+  personId?: string;
+  personName: string;
+  recipientPhone?: string;
+  messageType: MessageType;
+  channel: MessageChannel;
+  status: MessageStatus;
+  messageContent: string;
+  language: MessageLanguage;
+  amount?: number;
+  sentAt: string;
+  createdAt: string;
+}
+
+export type KhataFilterType =
+  | 'all'
+  | 'credit'
+  | 'debt'
+  | 'pending'
+  | 'settled'
+  | 'overdue'
+  | 'upcoming';
+
+export type KhataSortType =
+  | 'name_asc'
+  | 'name_desc'
+  | 'amount_desc'
+  | 'amount_asc'
+  | 'recent_tx'
+  | 'oldest_tx'
+  | 'due_date_asc'
+  | 'due_date_desc';
 
 export interface RecurringTransaction {
   id: string;
@@ -294,6 +355,7 @@ export interface UserProfile {
   id: string;
   email: string | null;
   fullName: string | null;
+  phone?: string | null;
   avatarUrl: string | null;
   currency: string;
   themePreference: string;

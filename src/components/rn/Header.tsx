@@ -39,9 +39,9 @@ export const Header: React.FC<HeaderProps> = ({ currentMode, onOpenSettings }) =
         <View style={styles.iconCircle}>
           <Wallet size={20} color={colors.white} />
         </View>
-        <View>
-          <Text style={styles.title}>MY WALLET</Text>
-          <Text style={styles.subtitle}>{getModeLabel()}</Text>
+        <View style={styles.titleCol}>
+          <Text style={styles.title} numberOfLines={1}>MY WALLET</Text>
+          <Text style={styles.subtitle} numberOfLines={1}>{getModeLabel()}</Text>
         </View>
       </View>
 
@@ -91,6 +91,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
+    marginRight: 8,
+  },
+  titleCol: {
+    flex: 1,
   },
   iconCircle: {
     width: 38,

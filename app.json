@@ -2,11 +2,15 @@
   "expo": {
     "name": "My Wallet",
     "slug": "my-wallet",
+    "scheme": "mywallet",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "MY WALLET requires Face ID authentication to secure your financial records."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,7 +20,9 @@
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -32,7 +38,13 @@
       ],
       "expo-document-picker",
       "expo-asset",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow MY WALLET to use Face ID to authenticate you."
+        }
+      ]
     ],
     "extra": {
       "eas": {

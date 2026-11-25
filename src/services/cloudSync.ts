@@ -9,6 +9,7 @@ import {
   Transaction,
   RecurringTransaction,
   ReminderPreferences,
+  MessageRecord,
 } from '../types';
 
 export interface CloudPayload {
@@ -26,6 +27,11 @@ export interface CloudPayload {
 
 export interface CloudFetchResult {
   hasData: boolean;
+  hasTransactions: boolean;
+  hasKhata: boolean;
+  hasAccounts: boolean;
+  hasPeople: boolean;
+  hasBudgets: boolean;
   openingBalance: number;
   accounts: Account[];
   accountTransfers: AccountTransfer[];
@@ -35,14 +41,18 @@ export interface CloudFetchResult {
   creditDebtRecords: CreditDebtRecord[];
   transactions: Transaction[];
   reminderPreferences: ReminderPreferences;
+  messageHistory: MessageRecord[];
+  queryErrors: string[];
 }
 
-// Fetch all user data from Supabase
+// Fetch all user data from Supabase with safe error isolation
 export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetchResult | null> {
   const client = getSupabaseClient() as any;
   if (!client) return null;
 
   try {
+    const queryErrors: string[] = [];
+
     const [
       settingsRes,
       accountsRes,
@@ -53,6 +63,7 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       peopleRes,
       khataRes,
       transactionsRes,
+      messagesRes,
     ] = await Promise.all([
       client.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
       client.from('accounts').select('*').eq('user_id', userId),
@@ -63,14 +74,23 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       client.from('khata_people').select('*').eq('user_id', userId),
       client.from('khata_transactions').select('*').eq('user_id', userId),
       client.from('transactions').select('*').eq('user_id', userId),
+      client.from('message_history').select('*').eq('user_id', userId).catch(() => ({ data: [] })),
     ]);
 
-    const hasData = Boolean(
-      (transactionsRes.data && transactionsRes.data.length > 0) ||
-      (khataRes.data && khataRes.data.length > 0) ||
-      (accountsRes.data && accountsRes.data.length > 0) ||
-      (peopleRes.data && peopleRes.data.length > 0)
-    );
+    if (transactionsRes.error) queryErrors.push(`transactions: ${transactionsRes.error.message}`);
+    if (khataRes.error) queryErrors.push(`khata_transactions: ${khataRes.error.message}`);
+    if (peopleRes.error) queryErrors.push(`khata_people: ${peopleRes.error.message}`);
+    if (accountsRes.error) queryErrors.push(`accounts: ${accountsRes.error.message}`);
+    if (budgetsRes.error) queryErrors.push(`budgets: ${budgetsRes.error.message}`);
+
+    const hasTransactions = Boolean(transactionsRes.data && transactionsRes.data.length > 0);
+    const hasKhata = Boolean(khataRes.data && khataRes.data.length > 0);
+    const hasPeople = Boolean(peopleRes.data && peopleRes.data.length > 0);
+    const hasAccounts = Boolean(accountsRes.data && accountsRes.data.length > 0);
+    const hasBudgets = Boolean(budgetsRes.data && budgetsRes.data.length > 0);
+
+    // Only consider cloud as having real user data if actual financial records exist
+    const hasData = hasTransactions || hasKhata || hasPeople || (hasBudgets && budgetsRes.data.length > 0);
 
     // Map subcategories by categoryId
     const subcatsByCategory: Record<string, any[]> = {};
@@ -196,8 +216,28 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       browserNotifications: false,
     };
 
+    // Map messages
+    const messageHistory: MessageRecord[] = (messagesRes?.data || []).map((m: any) => ({
+      id: m.id,
+      personId: m.person_id || undefined,
+      personName: m.person_name,
+      recipientPhone: m.recipient_phone || undefined,
+      messageContent: m.message_content,
+      messageType: m.message_type,
+      channel: m.channel,
+      status: m.status,
+      language: m.language || 'en',
+      sentAt: m.sent_at,
+      createdAt: m.created_at,
+    }));
+
     return {
       hasData,
+      hasTransactions,
+      hasKhata,
+      hasAccounts,
+      hasPeople,
+      hasBudgets,
       openingBalance,
       accounts,
       accountTransfers,
@@ -207,6 +247,8 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       creditDebtRecords,
       transactions,
       reminderPreferences,
+      messageHistory,
+      queryErrors,
     };
   } catch (err) {
     console.warn('fetchUserDataFromCloud error:', err);
@@ -351,14 +393,14 @@ export async function syncAllDataToCloud(
     // 8. Budgets
     if (payload.budgets.length > 0) {
       const rows = payload.budgets.map((b) => ({
-        id: b.id,
+        id: b.id.includes(userId) ? b.id : `budget-${userId}-${b.month}`,
         user_id: userId,
         month: b.month,
         total_budget: b.totalBudget || 0,
         category_budgets: (b.categoryBudgets || {}) as any,
         subcategory_budgets: (b.subcategoryBudgets || {}) as any,
       }));
-      await client.from('budgets').upsert(rows, { onConflict: 'id' });
+      await client.from('budgets').upsert(rows, { onConflict: 'user_id,month' });
       syncedCount += rows.length;
     }
 
@@ -517,5 +559,61 @@ export async function syncTransferItem(
     }, { onConflict: 'id' });
   } catch (err) {
     console.warn('syncTransferItem error:', err);
+  }
+}
+
+export async function syncBudgetItem(
+  userId: string,
+  budget: Budget
+): Promise<void> {
+  const client = getSupabaseClient() as any;
+  if (!client) return;
+
+  try {
+    const budgetId = budget.id.includes(userId) ? budget.id : `budget-${userId}-${budget.month}`;
+    await client.from('budgets').upsert({
+      id: budgetId,
+      user_id: userId,
+      month: budget.month,
+      total_budget: budget.totalBudget || 0,
+      category_budgets: (budget.categoryBudgets || {}) as any,
+      subcategory_budgets: (budget.subcategoryBudgets || {}) as any,
+    }, { onConflict: 'user_id,month' });
+  } catch (err) {
+    console.warn('syncBudgetItem error:', err);
+  }
+}
+
+export async function syncMessageItem(
+  userId: string,
+  record: MessageRecord,
+  action: 'upsert' | 'delete'
+): Promise<void> {
+  const client = getSupabaseClient() as any;
+  if (!client) return;
+
+  try {
+    if (action === 'delete') {
+      await client.from('message_history').delete().eq('id', record.id).eq('user_id', userId);
+    } else {
+      await client.from('message_history').upsert(
+        {
+          id: record.id,
+          user_id: userId,
+          person_id: record.personId || null,
+          person_name: record.personName,
+          recipient_phone: record.recipientPhone || null,
+          message_content: record.messageContent,
+          message_type: record.messageType,
+          channel: record.channel,
+          status: record.status,
+          language: record.language || 'en',
+          sent_at: record.sentAt,
+        },
+        { onConflict: 'id' }
+      );
+    }
+  } catch (err) {
+    console.warn('syncMessageItem notice:', err);
   }
 }

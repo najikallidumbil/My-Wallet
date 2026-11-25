@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Share,
   Platform,
+  Switch,
 } from 'react-native';
 import {
   X,
@@ -30,11 +31,25 @@ import {
   FileText,
   AlertCircle,
   Sparkles,
+  Phone,
+  Lock,
+  Fingerprint,
+  Smile,
+  Clock,
+  Database,
+  History,
+  HardDrive,
+  Save,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { useAuth } from '../../context/AuthContext';
+import { useSecurity } from '../../context/SecurityContext';
 import { colors } from '../../theme/colors';
 import { formatRupees } from '../../lib/currency';
+import { SupabaseConfigModal } from '../auth/SupabaseConfigModal';
+import { ClearDataOtpModal } from './ClearDataOtpModal';
+import { PinSetupModal } from '../security/PinSetupModal';
+import { WalletBackupEntry } from '../../services/backupService';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -55,21 +70,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     accounts,
     syncState,
     lastSyncedAt,
+    pendingSyncCount,
     hasUnmigratedLocalData,
     triggerManualSync,
     migrateLocalDataToCloud,
     exportAllDataJson,
     exportTransactionsCsv,
     restoreFromJsonBackup,
+    triggerBackupNow,
+    backupHistory,
+    lastBackupTime,
+    refreshBackupHistory,
+    restoreFromBackupEntry,
   } = useWallet();
 
   const {
     user,
     profile,
+    registeredMobile,
     signOut,
     requestRecoveryEmailOtp,
     verifyRecoveryEmailOtp,
   } = useAuth();
+
+  const {
+    isAppLockEnabled,
+    isBiometricEnabled,
+    hasPin,
+    autoLockDuration,
+    biometricCapability,
+    setAppLockEnabled,
+    setBiometricEnabled,
+    setAutoLockDuration,
+    lockApp,
+  } = useSecurity();
+
+  // App Security PIN Modal state
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [pinModalMode, setPinModalMode] = useState<'setup' | 'change'>('setup');
+
+  // Clear All Data OTP Modal state
+  const [isClearDataOtpModalOpen, setIsClearDataOtpModalOpen] = useState(false);
+
+  // Backup System state
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isBackupHistoryModalOpen, setIsBackupHistoryModalOpen] = useState(false);
 
   // Balance edit state
   const [inputBalance, setInputBalance] = useState(String(openingBalance));
@@ -93,6 +138,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [restoreJsonInput, setRestoreJsonInput] = useState('');
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+
+  // Toggle App Lock handler
+  const handleToggleAppLock = async (value: boolean) => {
+    if (value) {
+      if (!hasPin) {
+        Alert.alert(
+          'Set App Security PIN',
+          'Please create a 4 to 6 digit security PIN first before enabling App Lock.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Set PIN',
+              onPress: () => {
+                setPinModalMode('setup');
+                setIsPinModalOpen(true);
+              },
+            },
+          ]
+        );
+        return;
+      }
+      await setAppLockEnabled(true);
+    } else {
+      await setAppLockEnabled(false);
+    }
+  };
 
   // Update opening balance
   const handleSaveOpeningBalance = () => {
@@ -115,6 +187,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } else {
       Alert.alert('Sync Notice', res.error || 'Failed to sync with cloud.');
     }
+  };
+
+  // Trigger immediate Backup
+  const handleBackupNow = async () => {
+    setIsBackingUp(true);
+    const res = await triggerBackupNow();
+    setIsBackingUp(false);
+    if (res.success && res.backup) {
+      Alert.alert(
+        'Backup Created Successfully',
+        `Snapshot "${res.backup.backupName}" saved securely.\n\n` +
+          `• Transactions: ${res.backup.recordCounts.transactions}\n` +
+          `• Khata Records: ${res.backup.recordCounts.khataRecords}\n` +
+          `• Contacts: ${res.backup.recordCounts.people}\n` +
+          `• Accounts: ${res.backup.recordCounts.accounts}`
+      );
+    } else {
+      Alert.alert('Backup Error', res.error || 'Failed to create backup.');
+    }
+  };
+
+  // Confirm and Restore a Backup Snapshot
+  const handleConfirmRestoreEntry = (entry: WalletBackupEntry) => {
+    Alert.alert(
+      'Restore Backup Snapshot',
+      `Restore "${entry.backupName}"?\n\n` +
+        `• ${entry.recordCounts.transactions} Transactions\n` +
+        `• ${entry.recordCounts.khataRecords} Khata Records\n` +
+        `• ${entry.recordCounts.people} Contacts\n\n` +
+        `Existing records will be safely merged and updated without deleting newer data.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore Now',
+          style: 'default',
+          onPress: async () => {
+            const res = await restoreFromBackupEntry(entry);
+            if (res.success) {
+              Alert.alert('Restore Complete', `Successfully merged ${res.restoredCount} records from backup.`);
+              setIsBackupHistoryModalOpen(false);
+            } else {
+              Alert.alert('Restore Error', res.error || 'Failed to restore backup snapshot.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Migrate local data
@@ -250,23 +369,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  // Clear All Data - Protected by OTP Security
   const handleClearAll = () => {
-    Alert.alert(
-      'Clear All Records',
-      'Are you sure you want to clear all transactions, khata records, and reset accounts to clean initial state?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear All',
-          style: 'destructive',
-          onPress: () => {
-            resetToDefaults();
-            setInputBalance('0');
-            Alert.alert('Cleared', 'All records have been cleared successfully.');
-          },
-        },
-      ]
-    );
+    setIsClearDataOtpModalOpen(true);
+  };
+
+  const handleConfirmedClearAllData = async () => {
+    await resetToDefaults();
+    setInputBalance('0');
+    Alert.alert('Data Cleared', 'All financial records and account data have been permanently deleted.');
   };
 
   return (
@@ -306,6 +417,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <View style={styles.verifiedBadge}>
                       <Check size={12} color={colors.income.text} />
                       <Text style={styles.verifiedText}>Verified</Text>
+                    </View>
+                  </View>
+
+                  {/* Registered Mobile for Security OTP */}
+                  <View style={styles.emailRow}>
+                    <View style={[styles.emailIconBox, { backgroundColor: colors.brand[50] }]}>
+                      <Phone size={16} color={colors.brand[600]} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.emailLabel}>Registered Mobile</Text>
+                      <Text style={styles.emailValue}>
+                        {registeredMobile || '+91 98765 43210'}
+                      </Text>
+                    </View>
+                    <View style={styles.verifiedBadge}>
+                      <Check size={12} color={colors.income.text} />
+                      <Text style={styles.verifiedText}>Protected</Text>
                     </View>
                   </View>
 
@@ -362,19 +490,178 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </View>
 
-            {/* 2. CLOUD SYNCHRONIZATION & BACKUP */}
+            {/* 2. APP LOCK & BIOMETRIC SECURITY */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Lock size={16} color={colors.brand[600]} />
+                <Text style={styles.sectionTitle}>App Lock & Biometric Security</Text>
+              </View>
+              <Text style={styles.sectionDesc}>
+                Protect your financial transactions, ledgers, and sensitive balances with device biometrics and PIN lock.
+              </Text>
+
+              {/* Master App Lock Toggle */}
+              <View style={styles.securityToggleRow}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={styles.securityToggleLabel}>Enable App Lock</Text>
+                  <Text style={styles.securityToggleDesc}>
+                    Require authentication each time the app is opened or resumed
+                  </Text>
+                </View>
+                <Switch
+                  value={isAppLockEnabled}
+                  onValueChange={handleToggleAppLock}
+                  trackColor={{ false: colors.slate[300], true: colors.brand[600] }}
+                  thumbColor={colors.white}
+                />
+              </View>
+
+              {isAppLockEnabled && (
+                <View style={styles.securitySubSection}>
+                  {/* Biometric Auth Row */}
+                  <View style={styles.securityItemRow}>
+                    <View style={styles.securityItemIconBox}>
+                      {biometricCapability.primaryType === 'facial' ? (
+                        <Smile size={18} color={colors.brand[600]} />
+                      ) : (
+                        <Fingerprint size={18} color={colors.brand[600]} />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.securityItemTitle}>
+                        {biometricCapability.primaryType === 'facial'
+                          ? 'Face Authentication (Face ID)'
+                          : biometricCapability.primaryType === 'fingerprint'
+                          ? 'Fingerprint Authentication'
+                          : 'Biometric Authentication'}
+                      </Text>
+                      <Text style={styles.securityItemSubtitle}>
+                        {!biometricCapability.hasHardware
+                          ? 'Biometric hardware not detected on this device'
+                          : !biometricCapability.isEnrolled
+                          ? 'No biometrics registered in device settings'
+                          : `Unlock using device ${biometricCapability.typeLabel}`}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={isBiometricEnabled && biometricCapability.hasHardware && biometricCapability.isEnrolled}
+                      disabled={!biometricCapability.hasHardware || !biometricCapability.isEnrolled}
+                      onValueChange={(val) => {
+                        if (!biometricCapability.hasHardware || !biometricCapability.isEnrolled) {
+                          Alert.alert(
+                            'Biometrics Not Available',
+                            'Please configure fingerprint or facial recognition in your phone settings to enable this feature.'
+                          );
+                          return;
+                        }
+                        setBiometricEnabled(val);
+                      }}
+                      trackColor={{ false: colors.slate[300], true: colors.brand[600] }}
+                      thumbColor={colors.white}
+                    />
+                  </View>
+
+                  {/* App PIN Row */}
+                  <View style={styles.securityItemRow}>
+                    <View style={[styles.securityItemIconBox, { backgroundColor: colors.cyan[50] }]}>
+                      <KeyRound size={18} color={colors.cyan[600]} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.securityItemTitle}>App Security PIN</Text>
+                      <Text style={styles.securityItemSubtitle}>
+                        {hasPin ? 'PIN is configured (4-6 digits)' : 'No PIN configured yet'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.pinConfigBtn}
+                      onPress={() => {
+                        setPinModalMode(hasPin ? 'change' : 'setup');
+                        setIsPinModalOpen(true);
+                      }}
+                    >
+                      <Text style={styles.pinConfigBtnText}>
+                        {hasPin ? 'Change PIN' : 'Set PIN'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Auto Lock Duration */}
+                  <View style={styles.autoLockBox}>
+                    <View style={styles.autoLockHeader}>
+                      <Clock size={16} color={colors.slate[600]} />
+                      <Text style={styles.autoLockTitle}>Auto Lock Duration</Text>
+                    </View>
+                    <Text style={styles.autoLockSubtitle}>
+                      Automatically lock when the app goes into the background
+                    </Text>
+                    <View style={styles.durationPillsRow}>
+                      {(
+                        [
+                          { id: 'immediately', label: 'Immediately' },
+                          { id: '30s', label: '30s' },
+                          { id: '1m', label: '1m' },
+                          { id: '5m', label: '5m' },
+                          { id: '10m', label: '10m' },
+                        ] as const
+                      ).map((item) => {
+                        const isSelected = autoLockDuration === item.id;
+                        return (
+                          <TouchableOpacity
+                            key={item.id}
+                            style={[
+                              styles.durationPill,
+                              isSelected && styles.durationPillActive,
+                            ]}
+                            onPress={() => setAutoLockDuration(item.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.durationPillText,
+                                isSelected && styles.durationPillTextActive,
+                              ]}
+                            >
+                              {item.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* Lock App Now Button */}
+                  <TouchableOpacity
+                    style={styles.lockNowBtn}
+                    onPress={() => {
+                      onClose();
+                      lockApp();
+                    }}
+                  >
+                    <Lock size={15} color={colors.white} />
+                    <Text style={styles.lockNowBtnText}>Lock App Now</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* 3. CLOUD DATABASE & AUTOMATIC BACKUP */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <Cloud size={16} color={colors.brand[600]} />
-                <Text style={styles.sectionTitle}>Cloud Synchronization</Text>
+                <Text style={styles.sectionTitle}>Cloud Database & Automatic Backup</Text>
               </View>
+              <Text style={styles.sectionDesc}>
+                Real-time Supabase cloud synchronization, offline queue protection, and automatic snapshots.
+              </Text>
 
+              {/* Sync Status Row */}
               <View style={styles.syncStatusRow}>
                 <View style={styles.statusPill}>
                   {syncState === 'synced' ? (
                     <>
                       <Cloud size={14} color={colors.income.text} />
-                      <Text style={[styles.statusText, { color: colors.income.text }]}>Synced</Text>
+                      <Text style={[styles.statusText, { color: colors.income.text }]}>
+                        {pendingSyncCount > 0 ? `${pendingSyncCount} queued` : 'Synced'}
+                      </Text>
                     </>
                   ) : syncState === 'syncing' ? (
                     <>
@@ -384,13 +671,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   ) : (
                     <>
                       <AlertCircle size={14} color={colors.slate[500]} />
-                      <Text style={[styles.statusText, { color: colors.slate[600] }]}>Offline</Text>
+                      <Text style={[styles.statusText, { color: colors.slate[600] }]}>
+                        {pendingSyncCount > 0 ? `${pendingSyncCount} Offline` : 'Offline'}
+                      </Text>
                     </>
                   )}
                 </View>
 
                 {lastSyncedAt && (
-                  <Text style={styles.lastSyncText}>Last synced at {lastSyncedAt}</Text>
+                  <Text style={styles.lastSyncText}>Last synced {lastSyncedAt}</Text>
                 )}
 
                 <TouchableOpacity
@@ -402,6 +691,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <Text style={styles.syncNowText}>Sync Now</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Automatic & Cloud Backup Card */}
+              <View style={styles.backupBox}>
+                <View style={styles.backupHeaderRow}>
+                  <View style={styles.backupIconBox}>
+                    <Database size={16} color={colors.brand[600]} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.backupTitle}>Automated & Cloud Backups</Text>
+                    <Text style={styles.backupSubtitle}>
+                      {lastBackupTime
+                        ? `Last backup: ${new Date(lastBackupTime).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}`
+                        : 'No backup snapshot created yet'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.backupActionsRow}>
+                  <TouchableOpacity
+                    style={styles.backupNowBtn}
+                    onPress={handleBackupNow}
+                    disabled={isBackingUp}
+                  >
+                    {isBackingUp ? (
+                      <ActivityIndicator size="small" color={colors.white} />
+                    ) : (
+                      <>
+                        <Save size={14} color={colors.white} />
+                        <Text style={styles.backupNowBtnText}>Backup Now</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.backupHistoryBtn}
+                    onPress={() => {
+                      refreshBackupHistory();
+                      setIsBackupHistoryModalOpen(true);
+                    }}
+                  >
+                    <History size={14} color={colors.brand[700]} />
+                    <Text style={styles.backupHistoryBtnText}>
+                      Snapshots ({backupHistory.length})
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.apiConfigBtn}
+                onPress={() => setIsSupabaseModalOpen(true)}
+              >
+                <Settings size={14} color={colors.brand[600]} />
+                <Text style={styles.apiConfigText}>Configure Supabase Cloud API</Text>
+              </TouchableOpacity>
 
               {/* Local Data Migration Prompt if unmigrated records exist */}
               {hasUnmigratedLocalData && (
@@ -457,7 +806,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             </View>
 
-            {/* 3. PHYSICAL OPENING BALANCE */}
+            {/* 4. PHYSICAL OPENING BALANCE */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <Wallet size={16} color={colors.income.text} />
@@ -485,7 +834,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             </View>
 
-            {/* 4. LOCAL VAULT STATISTICS */}
+            {/* 5. LOCAL VAULT STATISTICS */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <Shield size={16} color={colors.brand[600]} />
@@ -512,21 +861,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             </View>
 
-            {/* 5. CLEAR ALL RECORDS */}
+            {/* 6. CLEAR ALL DATA - SECURED WITH OTP */}
             <View style={[styles.sectionCard, styles.dangerCard]}>
               <View style={styles.sectionHeader}>
                 <Trash2 size={16} color={colors.expense.text} />
                 <Text style={[styles.sectionTitle, { color: colors.expense.text }]}>
-                  Reset Vault
+                  Reset Vault & Clear All Data
                 </Text>
               </View>
               <Text style={styles.sectionDesc}>
-                Permanently clear transactions and customer ledgers from this device.
+                Permanently clear transactions, khata ledgers, budgets, and all wallet data. Protected by 6-digit Email OTP verification.
               </Text>
 
-              <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll}>
+              <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll} activeOpacity={0.8}>
                 <Trash2 size={16} color={colors.white} />
-                <Text style={styles.clearBtnText}>Clear All Records</Text>
+                <Text style={styles.clearBtnText}>Clear All Data</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -664,6 +1013,103 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Text style={styles.modalPrimaryBtnText}>Restore Records</Text>
               )}
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* SUPABASE CLOUD CONFIG MODAL */}
+      <SupabaseConfigModal
+        visible={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
+      />
+
+      {/* CLEAR ALL DATA OTP VERIFICATION SECURITY MODAL */}
+      <ClearDataOtpModal
+        visible={isClearDataOtpModalOpen}
+        onClose={() => setIsClearDataOtpModalOpen(false)}
+        onConfirmDelete={handleConfirmedClearAllData}
+      />
+
+      {/* APP SECURITY PIN SETUP / CHANGE MODAL */}
+      <PinSetupModal
+        visible={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        mode={pinModalMode}
+      />
+
+      {/* BACKUP SNAPSHOTS HISTORY & RESTORE MODAL */}
+      <Modal visible={isBackupHistoryModalOpen} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={[styles.innerModalCard, { maxHeight: '85%' }]}>
+            <View style={styles.header}>
+              <View style={styles.titleRow}>
+                <Database size={18} color={colors.brand[600]} />
+                <Text style={styles.innerModalTitle}>Wallet Backup Snapshots</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsBackupHistoryModalOpen(false)}>
+                <X size={20} color={colors.slate[500]} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 12 }}>
+              <Text style={styles.innerModalDesc}>
+                Available backup snapshots stored locally and in Supabase Cloud. Restoring a snapshot will safely merge and recover records without deleting newer data.
+              </Text>
+
+              {backupHistory.length === 0 ? (
+                <View style={styles.emptyBackupBox}>
+                  <HardDrive size={32} color={colors.slate[400]} />
+                  <Text style={styles.emptyBackupText}>No backup snapshots created yet.</Text>
+                  <Text style={styles.emptyBackupSubtext}>
+                    Click "Backup Now" in Settings to create your first wallet snapshot.
+                  </Text>
+                </View>
+              ) : (
+                backupHistory.map((item) => (
+                  <View key={item.id} style={styles.backupItemCard}>
+                    <View style={styles.backupItemTop}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={styles.backupItemName}>{item.backupName}</Text>
+                          {item.isCloudSynced && (
+                            <View style={styles.cloudBadge}>
+                              <Cloud size={10} color={colors.income.text} />
+                              <Text style={styles.cloudBadgeText}>Cloud</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.backupItemDate}>
+                          {new Date(item.createdAt).toLocaleString()}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.restoreItemBtn}
+                        onPress={() => handleConfirmRestoreEntry(item)}
+                      >
+                        <Upload size={12} color={colors.white} />
+                        <Text style={styles.restoreItemBtnText}>Restore</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.backupCountsRow}>
+                      <Text style={styles.backupCountTag}>
+                        {item.recordCounts?.transactions || 0} Tx
+                      </Text>
+                      <Text style={styles.backupCountTag}>
+                        {item.recordCounts?.khataRecords || 0} Khata
+                      </Text>
+                      <Text style={styles.backupCountTag}>
+                        {item.recordCounts?.people || 0} Contacts
+                      </Text>
+                      <Text style={styles.backupCountTag}>
+                        {item.recordCounts?.accounts || 0} Accounts
+                      </Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -864,6 +1310,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: colors.brand[700],
+  },
+  apiConfigBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: colors.slate[50],
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  apiConfigText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.slate[700],
   },
   migrateBanner: {
     flexDirection: 'row',
@@ -1076,5 +1540,298 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.brand[800],
     fontWeight: '700',
+  },
+  // App Lock & Biometric Security Styles
+  securityToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.white,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+  },
+  securityToggleLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.slate[800],
+  },
+  securityToggleDesc: {
+    fontSize: 11,
+    color: colors.slate[500],
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  securitySubSection: {
+    gap: 10,
+    marginTop: 4,
+  },
+  securityItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.white,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+  },
+  securityItemIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.brand[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  securityItemTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.slate[800],
+  },
+  securityItemSubtitle: {
+    fontSize: 11,
+    color: colors.slate[500],
+    marginTop: 2,
+  },
+  pinConfigBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: colors.brand[50],
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+    borderRadius: 8,
+  },
+  pinConfigBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.brand[700],
+  },
+  autoLockBox: {
+    backgroundColor: colors.white,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    gap: 6,
+  },
+  autoLockHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  autoLockTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.slate[800],
+  },
+  autoLockSubtitle: {
+    fontSize: 11,
+    color: colors.slate[500],
+  },
+  durationPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  durationPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+  },
+  durationPillActive: {
+    backgroundColor: colors.brand[600],
+    borderColor: colors.brand[600],
+  },
+  durationPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.slate[700],
+  },
+  durationPillTextActive: {
+    color: colors.white,
+    fontWeight: '700',
+  },
+  lockNowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    backgroundColor: colors.slate[800],
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  lockNowBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.white,
+  },
+
+  // Backup & Restore Styles
+  backupBox: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    gap: 10,
+    marginTop: 8,
+  },
+  backupHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  backupIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: colors.brand[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backupTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.slate[800],
+  },
+  backupSubtitle: {
+    fontSize: 11,
+    color: colors.slate[500],
+    marginTop: 1,
+  },
+  backupActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  backupNowBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: colors.brand[600],
+    borderRadius: 8,
+  },
+  backupNowBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  backupHistoryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: colors.brand[50],
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+    borderRadius: 8,
+  },
+  backupHistoryBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.brand[700],
+  },
+  emptyBackupBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    gap: 8,
+  },
+  emptyBackupText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.slate[700],
+  },
+  emptyBackupSubtext: {
+    fontSize: 11,
+    color: colors.slate[500],
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  backupItemCard: {
+    backgroundColor: colors.slate[50],
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    gap: 8,
+  },
+  backupItemTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  backupItemName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.slate[800],
+  },
+  cloudBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: colors.income.bg,
+    borderRadius: 4,
+  },
+  cloudBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.income.text,
+  },
+  backupItemDate: {
+    fontSize: 11,
+    color: colors.slate[400],
+    marginTop: 2,
+  },
+  restoreItemBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: colors.slate[800],
+    borderRadius: 6,
+  },
+  restoreItemBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  backupCountsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.slate[200],
+    paddingTop: 6,
+  },
+  backupCountTag: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.slate[600],
+    backgroundColor: colors.white,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
   },
 });

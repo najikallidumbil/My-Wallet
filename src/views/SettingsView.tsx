@@ -18,6 +18,7 @@ import {
   Wallet,
   Check,
 } from 'lucide-react';
+import { ClearDataOtpModal } from '../components/rn/ClearDataOtpModal';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -39,6 +40,7 @@ export const SettingsView: React.FC = () => {
 
   const [copied, setCopied] = useState(false);
   const [resetMessage, setResetMessage] = useState(false);
+  const [isClearDataOtpModalOpen, setIsClearDataOtpModalOpen] = useState(false);
   const [notificationTestMessage, setNotificationTestMessage] = useState<string | null>(null);
 
   // Opening balance editor state
@@ -152,11 +154,13 @@ export const SettingsView: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (window.confirm('Clear all transactions, khata records, and reset accounts to clean initial state?')) {
-      resetToDefaults();
-      setResetMessage(true);
-      setTimeout(() => setResetMessage(false), 3000);
-    }
+    setIsClearDataOtpModalOpen(true);
+  };
+
+  const handleConfirmedClearAllData = async () => {
+    await resetToDefaults();
+    setResetMessage(true);
+    setTimeout(() => setResetMessage(false), 3000);
   };
 
   const copyEnvSnippet = () => {
@@ -517,13 +521,19 @@ export const SettingsView: React.FC = () => {
 
           <button
             onClick={handleReset}
-            className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950 dark:hover:text-rose-400 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 transition-colors"
+            className="px-4 py-2.5 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900 rounded-xl text-xs font-semibold border border-rose-200 dark:border-rose-800 flex items-center justify-center gap-2 transition-colors"
           >
             <RotateCcw className="w-4 h-4" />
-            <span>Clear All Records</span>
+            <span>Clear All Data</span>
           </button>
         </div>
       </div>
+
+      <ClearDataOtpModal
+        visible={isClearDataOtpModalOpen}
+        onClose={() => setIsClearDataOtpModalOpen(false)}
+        onConfirmDelete={handleConfirmedClearAllData}
+      />
     </div>
   );
 };

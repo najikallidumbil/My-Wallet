@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,23 +12,29 @@ import {
 import {
   X,
   MessageCircle,
-  Phone,
   ArrowUpRight,
   ArrowDownLeft,
   CheckCircle2,
+  Clock,
+  Edit2,
+  Check,
+  ShieldCheck,
+  Trash2,
 } from 'lucide-react-native';
-import * as Linking from 'expo-linking';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
 import { formatRupees } from '../../lib/currency';
 import { formatDate } from '../../lib/date';
-import { PersonSummary, CreditDebtRecord } from '../../types';
+import { PersonSummary, CreditDebtRecord, MessageType } from '../../types';
+import { useResponsive } from '../../lib/useResponsive';
+import { SmartMessageModal } from './SmartMessageModal';
 
 interface PersonLedgerModalProps {
   visible: boolean;
   personSummary: PersonSummary | null;
   onClose: () => void;
-  onOpenQuickAdd: (mode: 'credit' | 'debt') => void;
+  onOpenQuickAdd: (mode: 'credit' | 'debt', personName?: string, personPhone?: string) => void;
+  onOpenSettleModal?: (mode: 'receive' | 'repay') => void;
 }
 
 export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
@@ -36,52 +42,127 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
   personSummary,
   onClose,
   onOpenQuickAdd,
+  onOpenSettleModal,
 }) => {
+  const { isNarrowMobile, isTablet, isDesktop } = useResponsive();
+  const isWide = isTablet || isDesktop;
+
   if (!personSummary) return null;
 
   const {
     creditDebtRecords,
     settleCreditDebt,
+    updatePerson,
+    deletePerson,
   } = useWallet();
 
+  // History Filter
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'this_month' | 'last_month' | 'pending' | 'settled'>('all');
+
+  // Inline Settle State
   const [settlingRecordId, setSettlingRecordId] = useState<string | null>(null);
   const [settleAmount, setSettleAmount] = useState('');
   const [settleNotes, setSettleNotes] = useState('');
 
+  // Edit Person State
+  const [isEditingPerson, setIsEditingPerson] = useState(false);
+  const [editName, setEditName] = useState(personSummary.name);
+  const [editPhone, setEditPhone] = useState(personSummary.phone || '');
+
+  // Smart Message Modal State
+  const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [messageInitialType, setMessageInitialType] = useState<MessageType>('payment_reminder');
+  const [selectedRecordForMessage, setSelectedRecordForMessage] = useState<CreditDebtRecord | null>(null);
+
   // Get all credit/debt records for this person
-  const personRecords = creditDebtRecords.filter(
-    (r) => r.personId === personSummary.id || r.counterpartName === personSummary.name
-  );
+  const personRecords = useMemo(() => {
+    return creditDebtRecords
+      .filter(
+        (r) =>
+          r.personId === personSummary.id ||
+          r.counterpartName?.trim().toLowerCase() === personSummary.name.trim().toLowerCase()
+      )
+      .sort((a, b) => {
+        const dateA = a.transactionDate || (a.createdAt ? a.createdAt.slice(0, 10) : '');
+        const dateB = b.transactionDate || (b.createdAt ? b.createdAt.slice(0, 10) : '');
+        return dateB.localeCompare(dateA);
+      });
+  }, [creditDebtRecords, personSummary]);
+
+  // Filtered Ledger Entries
+  const filteredRecords = useMemo(() => {
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const lastMonthD = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonth = `${lastMonthD.getFullYear()}-${String(lastMonthD.getMonth() + 1).padStart(2, '0')}`;
+
+    return personRecords.filter((r) => {
+      const dateStr = r.transactionDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+      const isSettled = (r.remainingAmount || 0) <= 0;
+
+      if (historyFilter === 'this_month') {
+        return dateStr.startsWith(currentMonth);
+      }
+      if (historyFilter === 'last_month') {
+        return dateStr.startsWith(lastMonth);
+      }
+      if (historyFilter === 'pending') {
+        return !isSettled;
+      }
+      if (historyFilter === 'settled') {
+        return isSettled;
+      }
+      return true;
+    });
+  }, [personRecords, historyFilter]);
 
   const isRec = personSummary.netBalance > 0;
   const isPay = personSummary.netBalance < 0;
 
-  const handleWhatsApp = () => {
-    if (!personSummary.phone) {
-      Alert.alert('No Phone Number', `No phone number saved for ${personSummary.name}.`);
+  // Save edited person info
+  const handleSavePersonEdit = () => {
+    if (!editName.trim()) {
+      Alert.alert('Required Field', 'Name cannot be empty.');
       return;
     }
-    const cleanPhone = personSummary.phone.replace(/[^0-9]/g, '');
-    const phoneWithCountry = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-    const amountStr = formatRupees(Math.abs(personSummary.netBalance));
-    const msg = `Hi ${personSummary.name}, reminder regarding the outstanding balance of ${amountStr} with My Wallet. Thank you!`;
-    const url = `whatsapp://send?phone=${phoneWithCountry}&text=${encodeURIComponent(msg)}`;
-    Linking.openURL(url).catch(() => {
-      Linking.openURL(`https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(msg)}`);
+    updatePerson(personSummary.id, {
+      name: editName.trim(),
+      phone: editPhone.trim() || undefined,
     });
+    setIsEditingPerson(false);
+    Alert.alert('Updated', 'Contact information saved.');
   };
 
-  const handleSMS = () => {
-    if (!personSummary.phone) {
-      Alert.alert('No Phone Number', `No phone number saved for ${personSummary.name}.`);
+  // Safe delete with validation
+  const handleDeletePersonSafe = () => {
+    if (Math.abs(personSummary.netBalance) > 0) {
+      Alert.alert(
+        'Cannot Delete Contact',
+        `"${personSummary.name}" has an unsettled balance of ${formatRupees(
+          Math.abs(personSummary.netBalance)
+        )}. Please settle the outstanding balance before deleting this contact.`
+      );
       return;
     }
-    const cleanPhone = personSummary.phone.replace(/[^0-9]/g, '');
-    const amountStr = formatRupees(Math.abs(personSummary.netBalance));
-    const msg = `Hi ${personSummary.name}, reminder regarding the outstanding balance of ${amountStr}. Thank you.`;
-    Linking.openURL(`sms:${cleanPhone}?body=${encodeURIComponent(msg)}`);
+
+    Alert.alert(
+      'Delete Contact',
+      `Are you sure you want to delete "${personSummary.name}" from your Khata Book?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deletePerson(personSummary.id);
+            onClose();
+          },
+        },
+      ]
+    );
   };
 
+  // Confirm partial or full settlement
   const handleConfirmSettle = (record: CreditDebtRecord) => {
     const num = parseFloat(settleAmount);
     if (isNaN(num) || num <= 0) {
@@ -116,9 +197,15 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.backdrop}>
-        <View style={styles.modalCard}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={[styles.backdrop, isWide && styles.backdropWide]}>
+        <View
+          style={[
+            styles.modalCard,
+            isWide && styles.modalCardWide,
+            isNarrowMobile && styles.modalCardNarrow,
+          ]}
+        >
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.personHeader}>
@@ -127,208 +214,475 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                   {personSummary.name.slice(0, 2).toUpperCase()}
                 </Text>
               </View>
-              <View>
-                <Text style={styles.personName}>{personSummary.name}</Text>
-                <Text style={styles.personPhone}>{personSummary.phone || 'No phone'}</Text>
+              <View style={{ flex: 1 }}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.personName} numberOfLines={1}>
+                    {personSummary.name}
+                  </Text>
+                  {personSummary.paymentStatus === 'overdue' && (
+                    <View style={styles.overdueBadge}>
+                      <Text style={styles.overdueBadgeText}>Overdue</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.personPhone}>{personSummary.phone || 'No phone number'}</Text>
               </View>
             </View>
 
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
               <X size={20} color={colors.slate[600]} />
             </TouchableOpacity>
           </View>
 
-          {/* Balance Hero Card */}
-          <View style={styles.heroCard}>
-            <View style={styles.heroRow}>
-              <Text style={styles.heroLabel}>OUTSTANDING STANDING</Text>
-              <View
-                style={[
-                  styles.statusPill,
-                  isRec ? styles.pillRec : isPay ? styles.pillPay : styles.pillSettled,
-                ]}
-              >
-                <Text
+          <ScrollView style={styles.bodyScroll} showsVerticalScrollIndicator={false}>
+            {/* Inline Person Editing Form (when triggered) */}
+            {isEditingPerson && (
+              <View style={styles.editPersonCard}>
+                <Text style={styles.editCardTitle}>Edit Contact Details</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  placeholder="Full Name"
+                />
+                <TextInput
+                  style={[styles.editInput, { marginTop: 6 }]}
+                  value={editPhone}
+                  onChangeText={setEditPhone}
+                  placeholder="Mobile Phone (for reminders)"
+                  keyboardType="phone-pad"
+                />
+                <View style={styles.editBtnRow}>
+                  <TouchableOpacity
+                    style={[styles.editActionBtn, styles.saveEditBtn]}
+                    onPress={handleSavePersonEdit}
+                  >
+                    <Check size={14} color={colors.white} />
+                    <Text style={styles.saveEditText}>Save</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.editActionBtn, styles.cancelEditBtn]}
+                    onPress={() => setIsEditingPerson(false)}
+                  >
+                    <Text style={styles.cancelEditText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* 1. Net Outstanding Balance Hero */}
+            <View style={styles.heroCard}>
+              <View style={styles.heroRow}>
+                <Text style={styles.heroLabel}>NET OUTSTANDING BALANCE</Text>
+                <View
                   style={[
-                    styles.statusText,
-                    isRec ? styles.textRec : isPay ? styles.textPay : styles.textSettled,
+                    styles.statusPill,
+                    isRec ? styles.pillRec : isPay ? styles.pillPay : styles.pillSettled,
                   ]}
                 >
-                  {isRec ? "You'll Get" : isPay ? "You'll Pay" : 'Settled'}
-                </Text>
+                  <Text
+                    style={[
+                      styles.statusText,
+                      isRec ? styles.textRec : isPay ? styles.textPay : styles.textSettled,
+                    ]}
+                  >
+                    {isRec ? "You'll Get" : isPay ? "You'll Pay" : 'Settled (₹0)'}
+                  </Text>
+                </View>
+              </View>
+
+              <Text
+                style={[
+                  styles.heroAmount,
+                  isRec ? styles.textRec : isPay ? styles.textPay : styles.textSettled,
+                ]}
+              >
+                {formatRupees(Math.abs(personSummary.netBalance))}
+              </Text>
+
+              {/* Complete 6 Financial Metric Breakdown */}
+              <View style={styles.financialMetricsGrid}>
+                {/* Credit (Lending) Column */}
+                <View style={styles.metricColumn}>
+                  <Text style={styles.colTitle}>MONEY LENT (CREDIT)</Text>
+                  <View style={styles.metricRow}>
+                    <Text style={styles.metricLabel}>Total Lent:</Text>
+                    <Text style={styles.metricVal}>{formatRupees(personSummary.totalGiven)}</Text>
+                  </View>
+                  <View style={styles.metricRow}>
+                    <Text style={styles.metricLabel}>Received Back:</Text>
+                    <Text style={[styles.metricVal, { color: colors.income.text }]}>
+                      {formatRupees(personSummary.totalReceivedBack)}
+                    </Text>
+                  </View>
+                  <View style={[styles.metricRow, styles.metricHighlightRow]}>
+                    <Text style={styles.metricLabelBold}>To Receive:</Text>
+                    <Text style={[styles.metricValBold, { color: colors.receivable.text }]}>
+                      {formatRupees(personSummary.outstandingReceivable)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Debt (Borrowing) Column */}
+                <View style={styles.metricColumn}>
+                  <Text style={styles.colTitle}>MONEY BORROWED (DEBT)</Text>
+                  <View style={styles.metricRow}>
+                    <Text style={styles.metricLabel}>Total Borrowed:</Text>
+                    <Text style={styles.metricVal}>{formatRupees(personSummary.totalBorrowed)}</Text>
+                  </View>
+                  <View style={styles.metricRow}>
+                    <Text style={styles.metricLabel}>Repaid by You:</Text>
+                    <Text style={[styles.metricVal, { color: colors.income.text }]}>
+                      {formatRupees(personSummary.totalRepaid)}
+                    </Text>
+                  </View>
+                  <View style={[styles.metricRow, styles.metricHighlightRow]}>
+                    <Text style={styles.metricLabelBold}>To Pay:</Text>
+                    <Text style={[styles.metricValBold, { color: colors.payable.text }]}>
+                      {formatRupees(personSummary.outstandingPayable)}
+                    </Text>
+                  </View>
+                </View>
               </View>
             </View>
 
-            <Text
-              style={[
-                styles.heroAmount,
-                isRec ? styles.textRec : isPay ? styles.textPay : styles.textSettled,
-              ]}
-            >
-              {formatRupees(Math.abs(personSummary.netBalance))}
-            </Text>
+            {/* 2. Permanent Action Buttons (7 Actions always accessible) */}
+            <View style={styles.actionsGrid}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.lendBtn]}
+                onPress={() => {
+                  onClose();
+                  onOpenQuickAdd('credit', personSummary.name, personSummary.phone);
+                }}
+              >
+                <ArrowUpRight size={15} color={colors.white} />
+                <Text style={styles.actionBtnText}>Give Money</Text>
+              </TouchableOpacity>
 
-            {/* Quick WhatsApp / SMS Shortcuts */}
-            {personSummary.phone && personSummary.netBalance !== 0 && (
-              <View style={styles.contactRow}>
-                <TouchableOpacity style={styles.contactBtn} onPress={handleWhatsApp}>
-                  <MessageCircle size={14} color="#15803d" />
-                  <Text style={[styles.contactBtnText, { color: '#15803d' }]}>WhatsApp</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.receiveBtn]}
+                onPress={() => {
+                  if (onOpenSettleModal) {
+                    onClose();
+                    onOpenSettleModal('receive');
+                  } else {
+                    onClose();
+                    onOpenQuickAdd('credit', personSummary.name, personSummary.phone);
+                  }
+                }}
+              >
+                <ArrowDownLeft size={15} color={colors.white} />
+                <Text style={styles.actionBtnText}>Receive Money</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity style={styles.contactBtn} onPress={handleSMS}>
-                  <Phone size={14} color={colors.slate[600]} />
-                  <Text style={styles.contactBtnText}>SMS</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.borrowBtn]}
+                onPress={() => {
+                  onClose();
+                  onOpenQuickAdd('debt', personSummary.name, personSummary.phone);
+                }}
+              >
+                <ArrowDownLeft size={15} color={colors.white} />
+                <Text style={styles.actionBtnText}>Borrow Money</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.repayBtn]}
+                onPress={() => {
+                  if (onOpenSettleModal) {
+                    onClose();
+                    onOpenSettleModal('repay');
+                  } else {
+                    onClose();
+                    onOpenQuickAdd('debt', personSummary.name, personSummary.phone);
+                  }
+                }}
+              >
+                <ArrowUpRight size={15} color={colors.white} />
+                <Text style={styles.actionBtnText}>Repay Money</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Secondary Actions: Reminders, Confirmation & Edit */}
+            <View style={styles.secondaryActionsRow}>
+              <TouchableOpacity
+                style={[styles.secBtn, styles.reminderBtn]}
+                onPress={() => {
+                  setMessageInitialType('payment_reminder');
+                  setIsMessageModalOpen(true);
+                }}
+              >
+                <MessageCircle size={15} color="#15803d" />
+                <Text style={[styles.secBtnText, { color: '#15803d' }]}>
+                  Send Reminder
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.secBtn, styles.confirmBtn]}
+                onPress={() => {
+                  setMessageInitialType(isRec ? 'payment_received' : 'payment_made');
+                  setIsMessageModalOpen(true);
+                }}
+              >
+                <ShieldCheck size={15} color={colors.brand[700]} />
+                <Text style={[styles.secBtnText, { color: colors.brand[700] }]}>
+                  Payment Receipt
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secBtn}
+                onPress={() => {
+                  setEditName(personSummary.name);
+                  setEditPhone(personSummary.phone || '');
+                  setIsEditingPerson((v) => !v);
+                }}
+              >
+                <Edit2 size={14} color={colors.slate[700]} />
+                <Text style={styles.secBtnText}>Edit</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.secBtn, styles.deleteBtn]}
+                onPress={handleDeletePersonSafe}
+              >
+                <Trash2 size={14} color={colors.expense.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* 3. Transaction History Ledger */}
+            <View style={styles.historySection}>
+              <View style={styles.historyHeader}>
+                <Text style={styles.historyTitle}>
+                  Ledger Statement ({personRecords.length})
+                </Text>
               </View>
-            )}
-          </View>
 
-          {/* Quick Transaction Action Buttons */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.lendBtn]}
-              onPress={() => {
-                onClose();
-                onOpenQuickAdd('credit');
-              }}
-            >
-              <ArrowUpRight size={16} color={colors.white} />
-              <Text style={styles.actionBtnText}>Give (Lend)</Text>
-            </TouchableOpacity>
+              {/* History Filter Tabs */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.historyFilterScroll}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.historyFilterPill,
+                    historyFilter === 'all' && styles.historyFilterPillActive,
+                  ]}
+                  onPress={() => setHistoryFilter('all')}
+                >
+                  <Text style={[styles.historyFilterText, historyFilter === 'all' && styles.historyFilterTextActive]}>
+                    All ({personRecords.length})
+                  </Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.borrowBtn]}
-              onPress={() => {
-                onClose();
-                onOpenQuickAdd('debt');
-              }}
-            >
-              <ArrowDownLeft size={16} color={colors.white} />
-              <Text style={styles.actionBtnText}>Borrow</Text>
-            </TouchableOpacity>
-          </View>
+                <TouchableOpacity
+                  style={[
+                    styles.historyFilterPill,
+                    historyFilter === 'pending' && styles.historyFilterPillActive,
+                  ]}
+                  onPress={() => setHistoryFilter('pending')}
+                >
+                  <Text style={[styles.historyFilterText, historyFilter === 'pending' && styles.historyFilterTextActive]}>
+                    Pending Due
+                  </Text>
+                </TouchableOpacity>
 
-          {/* Statement Transaction History */}
-          <ScrollView style={styles.historyScroll} showsVerticalScrollIndicator={false}>
-            <Text style={styles.historyTitle}>
-              Ledger Entries ({personRecords.length})
-            </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.historyFilterPill,
+                    historyFilter === 'this_month' && styles.historyFilterPillActive,
+                  ]}
+                  onPress={() => setHistoryFilter('this_month')}
+                >
+                  <Text style={[styles.historyFilterText, historyFilter === 'this_month' && styles.historyFilterTextActive]}>
+                    This Month
+                  </Text>
+                </TouchableOpacity>
 
-            {personRecords.length === 0 ? (
-              <Text style={styles.emptyHistory}>No entries for this person yet.</Text>
-            ) : (
-              personRecords.map((r) => {
-                const isEntryCredit = r.type === 'credit';
-                const isFullySettled = r.remainingAmount <= 0;
-                const isSettlingThis = settlingRecordId === r.id;
+                <TouchableOpacity
+                  style={[
+                    styles.historyFilterPill,
+                    historyFilter === 'last_month' && styles.historyFilterPillActive,
+                  ]}
+                  onPress={() => setHistoryFilter('last_month')}
+                >
+                  <Text style={[styles.historyFilterText, historyFilter === 'last_month' && styles.historyFilterTextActive]}>
+                    Last Month
+                  </Text>
+                </TouchableOpacity>
 
-                return (
-                  <View key={r.id} style={styles.entryCard}>
-                    <View style={styles.entryTop}>
-                      <View>
-                        <View style={styles.badgeRow}>
-                          <Text
-                            style={[
-                              styles.entryTypeBadge,
-                              isEntryCredit ? styles.badgeCredit : styles.badgeDebt,
-                            ]}
-                          >
-                            {isEntryCredit ? 'Lent (Credit)' : 'Borrowed (Debt)'}
-                          </Text>
-                          {isFullySettled && (
-                            <View style={styles.settledBadge}>
-                              <CheckCircle2 size={12} color={colors.income.text} />
-                              <Text style={styles.settledText}>Fully Paid</Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text style={styles.entryDate}>
-                          {formatDate(r.transactionDate)}{r.transactionTime ? ` • ${r.transactionTime}` : ''}
-                        </Text>
-                        {r.dueDate && (
-                          <Text style={styles.entryDue}>Due: {formatDate(r.dueDate)}</Text>
-                        )}
-                      </View>
+                <TouchableOpacity
+                  style={[
+                    styles.historyFilterPill,
+                    historyFilter === 'settled' && styles.historyFilterPillActive,
+                  ]}
+                  onPress={() => setHistoryFilter('settled')}
+                >
+                  <Text style={[styles.historyFilterText, historyFilter === 'settled' && styles.historyFilterTextActive]}>
+                    Fully Paid
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
 
-                      <View style={styles.entryAmountBox}>
-                        <Text style={styles.entryOriginalAmount}>
-                          {formatRupees(r.originalAmount)}
-                        </Text>
-                        {!isFullySettled && (
-                          <Text style={styles.entryRemainingAmount}>
-                            Due: {formatRupees(r.remainingAmount)}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
+              {/* Ledger Entries List */}
+              {filteredRecords.length === 0 ? (
+                <View style={styles.emptyHistoryBox}>
+                  <Text style={styles.emptyHistoryText}>
+                    No ledger entries matching this filter.
+                  </Text>
+                </View>
+              ) : (
+                filteredRecords.map((r) => {
+                  const isEntryCredit = r.type === 'credit';
+                  const isFullySettled = (r.remainingAmount || 0) <= 0;
+                  const isSettlingThis = settlingRecordId === r.id;
 
-                    {/* Repayments History */}
-                    {r.repayments && r.repayments.length > 0 && (
-                      <View style={styles.repaymentsBox}>
-                        <Text style={styles.repaymentsTitle}>Payment History:</Text>
-                        {r.repayments.map((rep) => (
-                          <View key={rep.id} style={styles.repRow}>
-                            <Text style={styles.repDate}>{formatDate(rep.paymentDate)}</Text>
-                            <Text style={styles.repAmount}>+ {formatRupees(rep.amount)}</Text>
+                  return (
+                    <View key={r.id} style={styles.entryCard}>
+                      <View style={styles.entryTop}>
+                        <View style={{ flex: 1 }}>
+                          <View style={styles.badgeRow}>
+                            <Text
+                              style={[
+                                styles.entryTypeBadge,
+                                isEntryCredit ? styles.badgeCredit : styles.badgeDebt,
+                              ]}
+                            >
+                              {isEntryCredit ? 'Lent (Credit)' : 'Borrowed (Debt)'}
+                            </Text>
+                            {isFullySettled ? (
+                              <View style={styles.settledBadge}>
+                                <CheckCircle2 size={12} color={colors.income.text} />
+                                <Text style={styles.settledText}>Fully Paid</Text>
+                              </View>
+                            ) : (
+                              <View style={styles.pendingBadge}>
+                                <Clock size={11} color={colors.payable.text} />
+                                <Text style={styles.pendingBadgeText}>Pending</Text>
+                              </View>
+                            )}
                           </View>
-                        ))}
-                      </View>
-                    )}
+                          <Text style={styles.entryDate}>
+                            {formatDate(r.transactionDate)}
+                            {r.transactionTime ? ` • ${r.transactionTime}` : ''}
+                          </Text>
+                          {r.dueDate && (
+                            <Text style={styles.entryDue}>
+                              Expected Due: {formatDate(r.dueDate)}
+                            </Text>
+                          )}
+                          {r.notes ? (
+                            <Text style={styles.entryNotes} numberOfLines={2}>
+                              {r.notes}
+                            </Text>
+                          ) : null}
+                        </View>
 
-                    {/* Settle / Partial Payment Trigger */}
-                    {!isFullySettled && !isSettlingThis && (
-                      <TouchableOpacity
-                        style={styles.settleTrigger}
-                        onPress={() => {
-                          setSettlingRecordId(r.id);
-                          setSettleAmount(String(r.remainingAmount));
-                        }}
-                      >
-                        <Text style={styles.settleTriggerText}>
-                          {isEntryCredit ? '+ Record Payment Received' : '+ Record Payment Made'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-
-                    {/* Inline Settlement Input Form */}
-                    {isSettlingThis && (
-                      <View style={styles.inlineSettleForm}>
-                        <Text style={styles.inlineSettleTitle}>Record Payment</Text>
-                        <TextInput
-                          style={styles.inlineInput}
-                          placeholder="Amount (₹)"
-                          keyboardType="numeric"
-                          value={settleAmount}
-                          onChangeText={setSettleAmount}
-                        />
-                        <TextInput
-                          style={[styles.inlineInput, { marginTop: 6 }]}
-                          placeholder="Notes (optional)"
-                          value={settleNotes}
-                          onChangeText={setSettleNotes}
-                        />
-                        <View style={styles.inlineBtnRow}>
+                        <View style={styles.entryAmountBox}>
+                          <Text style={styles.entryOriginalAmount}>
+                            {formatRupees(r.originalAmount)}
+                          </Text>
+                          {!isFullySettled && (
+                            <Text style={styles.entryRemainingAmount}>
+                              Due: {formatRupees(r.remainingAmount)}
+                            </Text>
+                          )}
+                          {/* Send specific reminder for this record */}
                           <TouchableOpacity
-                            style={[styles.inlineBtn, styles.inlineSaveBtn]}
-                            onPress={() => handleConfirmSettle(r)}
+                            style={styles.recordRemindBtn}
+                            onPress={() => {
+                              setSelectedRecordForMessage(r);
+                              setMessageInitialType('payment_reminder');
+                              setIsMessageModalOpen(true);
+                            }}
                           >
-                            <Text style={styles.inlineSaveText}>Save</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.inlineBtn, styles.inlineCancelBtn]}
-                            onPress={() => setSettlingRecordId(null)}
-                          >
-                            <Text style={styles.inlineCancelText}>Cancel</Text>
+                            <MessageCircle size={12} color="#15803d" />
+                            <Text style={styles.recordRemindBtnText}>Remind</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
-                    )}
-                  </View>
-                );
-              })
-            )}
+
+                      {/* Repayments History */}
+                      {r.repayments && r.repayments.length > 0 && (
+                        <View style={styles.repaymentsBox}>
+                          <Text style={styles.repaymentsTitle}>Payment History:</Text>
+                          {r.repayments.map((rep) => (
+                            <View key={rep.id} style={styles.repRow}>
+                              <Text style={styles.repDate}>{formatDate(rep.paymentDate)}</Text>
+                              <Text style={styles.repAmount}>+ {formatRupees(rep.amount)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Settle / Partial Payment Trigger */}
+                      {!isFullySettled && !isSettlingThis && (
+                        <TouchableOpacity
+                          style={styles.settleTrigger}
+                          onPress={() => {
+                            setSettlingRecordId(r.id);
+                            setSettleAmount(String(r.remainingAmount));
+                          }}
+                        >
+                          <Text style={styles.settleTriggerText}>
+                            {isEntryCredit ? '+ Record Payment Received' : '+ Record Payment Made'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Inline Settlement Input Form */}
+                      {isSettlingThis && (
+                        <View style={styles.inlineSettleForm}>
+                          <Text style={styles.inlineSettleTitle}>Record Partial / Full Payment</Text>
+                          <TextInput
+                            style={styles.inlineInput}
+                            placeholder="Payment Amount (₹)"
+                            keyboardType="numeric"
+                            value={settleAmount}
+                            onChangeText={setSettleAmount}
+                          />
+                          <TextInput
+                            style={[styles.inlineInput, { marginTop: 6 }]}
+                            placeholder="Notes (optional, e.g. Paid via GPay)"
+                            value={settleNotes}
+                            onChangeText={setSettleNotes}
+                          />
+                          <View style={styles.inlineBtnRow}>
+                            <TouchableOpacity
+                              style={[styles.inlineBtn, styles.inlineSaveBtn]}
+                              onPress={() => handleConfirmSettle(r)}
+                            >
+                              <Text style={styles.inlineSaveText}>Save Payment</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.inlineBtn, styles.inlineCancelBtn]}
+                              onPress={() => setSettlingRecordId(null)}
+                            >
+                              <Text style={styles.inlineCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </View>
           </ScrollView>
+
+          {/* Smart Message Modal instance */}
+          <SmartMessageModal
+            visible={isMessageModalOpen}
+            person={personSummary}
+            record={selectedRecordForMessage}
+            initialType={messageInitialType}
+            onClose={() => {
+              setIsMessageModalOpen(false);
+              setSelectedRecordForMessage(null);
+            }}
+          />
         </View>
       </View>
     </Modal>
@@ -341,49 +695,141 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backdrop,
     justifyContent: 'flex-end',
   },
+  backdropWide: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
   modalCard: {
     backgroundColor: colors.white,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    maxHeight: '90%',
     padding: 20,
-    paddingBottom: 32,
+    paddingBottom: 28,
+    maxHeight: '92%',
+  },
+  modalCardWide: {
+    width: '100%',
+    maxWidth: 640,
+    borderRadius: 24,
+    maxHeight: '88%',
+  },
+  modalCardNarrow: {
+    padding: 14,
+    paddingBottom: 20,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   personHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    flex: 1,
   },
   avatarBox: {
     width: 42,
     height: 42,
-    borderRadius: 16,
-    backgroundColor: colors.brand[600],
+    borderRadius: 14,
+    backgroundColor: colors.brand[50],
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    color: colors.white,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
+    color: colors.brand[700],
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   personName: {
     fontSize: 16,
     fontWeight: '800',
     color: colors.slate[900],
   },
+  overdueBadge: {
+    backgroundColor: colors.expense.bg,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  overdueBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.expense.text,
+  },
   personPhone: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.slate[400],
+    marginTop: 1,
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+  },
+  bodyScroll: {
+    flexGrow: 0,
+  },
+  editPersonCard: {
+    backgroundColor: colors.slate[50],
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  editCardTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.slate[600],
+    marginBottom: 8,
+  },
+  editInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 12,
+    color: colors.slate[900],
+  },
+  editBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  editActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    gap: 4,
+  },
+  saveEditBtn: {
+    backgroundColor: colors.brand[600],
+  },
+  saveEditText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cancelEditBtn: {
+    backgroundColor: colors.slate[200],
+  },
+  cancelEditText: {
+    color: colors.slate[700],
+    fontSize: 11,
+    fontWeight: '700',
   },
   heroCard: {
     backgroundColor: colors.slate[50],
@@ -400,14 +846,14 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   heroLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
     color: colors.slate[500],
     letterSpacing: 0.5,
   },
   statusPill: {
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: 8,
   },
   pillRec: {
@@ -423,10 +869,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
-  heroAmount: {
-    fontSize: 26,
-    fontWeight: '900',
-  },
   textRec: {
     color: colors.receivable.text,
   },
@@ -434,96 +876,199 @@ const styles = StyleSheet.create({
     color: colors.payable.text,
   },
   textSettled: {
-    color: colors.slate[800],
+    color: colors.slate[600],
   },
-  contactRow: {
+  heroAmount: {
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+    marginBottom: 10,
+  },
+  financialMetricsGrid: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: colors.slate[200],
   },
-  contactBtn: {
+  metricColumn: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: colors.white,
-    borderRadius: 10,
-    paddingVertical: 6,
+    borderRadius: 12,
+    padding: 10,
     borderWidth: 1,
-    borderColor: colors.slate[200],
-    gap: 6,
+    borderColor: colors.slate[100],
   },
-  contactBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
+  colTitle: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.slate[400],
+    letterSpacing: 0.5,
+    marginBottom: 6,
   },
-  actionRow: {
+  metricRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 3,
+  },
+  metricLabel: {
+    fontSize: 10,
+    color: colors.slate[500],
+  },
+  metricVal: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.slate[800],
+  },
+  metricHighlightRow: {
+    marginTop: 4,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.slate[100],
+  },
+  metricLabelBold: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.slate[700],
+  },
+  metricValBold: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  actionsGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
   },
   actionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 14,
-    paddingVertical: 12,
-    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    gap: 4,
   },
   lendBtn: {
     backgroundColor: colors.receivable.solid,
   },
+  receiveBtn: {
+    backgroundColor: colors.income.solid,
+  },
   borrowBtn: {
     backgroundColor: colors.payable.solid,
   },
+  repayBtn: {
+    backgroundColor: '#7c3aed',
+  },
   actionBtnText: {
     color: colors.white,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '800',
   },
-  historyScroll: {
-    maxHeight: 320,
+  secondaryActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  secBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.slate[100],
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
+  },
+  reminderBtn: {
+    flex: 1,
+    backgroundColor: '#dcfce7',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  confirmBtn: {
+    flex: 1,
+    backgroundColor: colors.brand[50],
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+  },
+  deleteBtn: {
+    backgroundColor: colors.expense.bg,
+  },
+  secBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.slate[700],
+  },
+  historySection: {
+    gap: 10,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   historyTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: colors.slate[800],
-    marginBottom: 10,
+    color: colors.slate[900],
   },
-  emptyHistory: {
-    fontSize: 12,
+  historyFilterScroll: {
+    flexDirection: 'row',
+  },
+  historyFilterPill: {
+    backgroundColor: colors.slate[100],
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginRight: 6,
+  },
+  historyFilterPillActive: {
+    backgroundColor: colors.brand[600],
+  },
+  historyFilterText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.slate[600],
+  },
+  historyFilterTextActive: {
+    color: colors.white,
+  },
+  emptyHistoryBox: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  emptyHistoryText: {
+    fontSize: 11,
     color: colors.slate[400],
-    textAlign: 'center',
-    paddingVertical: 20,
   },
   entryCard: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
+    backgroundColor: colors.slate[50],
     borderWidth: 1,
     borderColor: colors.slate[200],
+    borderRadius: 14,
     padding: 12,
-    marginBottom: 10,
+    gap: 8,
   },
   entryTop: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 8,
   },
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginBottom: 4,
   },
   entryTypeBadge: {
-    fontSize: 10,
-    fontWeight: '800',
     paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingVertical: 1,
     borderRadius: 6,
+    fontSize: 9,
+    fontWeight: '800',
   },
   badgeCredit: {
     backgroundColor: colors.receivable.bg,
@@ -536,56 +1081,91 @@ const styles = StyleSheet.create({
   settledBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
     backgroundColor: colors.income.bg,
     paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingVertical: 1,
     borderRadius: 6,
+    gap: 3,
   },
   settledText: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
     color: colors.income.text,
   },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.payable.bg,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    gap: 3,
+  },
+  pendingBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.payable.text,
+  },
   entryDate: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.slate[400],
-    marginTop: 4,
+    fontWeight: '500',
   },
   entryDue: {
+    fontSize: 10,
+    color: colors.slate[600],
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  entryNotes: {
     fontSize: 10,
     color: colors.slate[500],
     marginTop: 2,
   },
   entryAmountBox: {
     alignItems: 'flex-end',
+    gap: 2,
   },
   entryOriginalAmount: {
     fontSize: 14,
     fontWeight: '800',
-    color: colors.slate[800],
+    color: colors.slate[900],
   },
   entryRemainingAmount: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
-    color: colors.payable.text,
-    marginTop: 2,
+    color: colors.expense.text,
+  },
+  recordRemindBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 3,
+    marginTop: 4,
+  },
+  recordRemindBtnText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#15803d',
   },
   repaymentsBox: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.slate[100],
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: colors.slate[100],
   },
   repaymentsTitle: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
     color: colors.slate[400],
     marginBottom: 4,
   },
   repRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 2,
   },
@@ -594,41 +1174,39 @@ const styles = StyleSheet.create({
     color: colors.slate[500],
   },
   repAmount: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: colors.income.text,
   },
   settleTrigger: {
     backgroundColor: colors.brand[50],
-    paddingVertical: 8,
+    paddingVertical: 7,
     borderRadius: 10,
     alignItems: 'center',
-    marginTop: 8,
   },
   settleTriggerText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.brand[700],
   },
   inlineSettleForm: {
-    marginTop: 8,
-    backgroundColor: colors.slate[50],
-    padding: 10,
-    borderRadius: 12,
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: colors.slate[200],
+    borderColor: colors.brand[200],
+    borderRadius: 12,
+    padding: 10,
+    gap: 6,
   },
   inlineSettleTitle: {
     fontSize: 11,
     fontWeight: '800',
-    color: colors.slate[700],
-    marginBottom: 6,
+    color: colors.brand[900],
   },
   inlineInput: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.slate[50],
     borderWidth: 1,
     borderColor: colors.slate[200],
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
     fontSize: 12,
@@ -637,28 +1215,28 @@ const styles = StyleSheet.create({
   inlineBtnRow: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
+    marginTop: 2,
   },
   inlineBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 8,
+    alignItems: 'center',
   },
   inlineSaveBtn: {
     backgroundColor: colors.brand[600],
   },
   inlineSaveText: {
-    color: colors.white,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
+    color: colors.white,
   },
   inlineCancelBtn: {
     backgroundColor: colors.slate[200],
   },
   inlineCancelText: {
-    color: colors.slate[700],
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
+    color: colors.slate[700],
   },
 });

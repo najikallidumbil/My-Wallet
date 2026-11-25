@@ -22,12 +22,20 @@ import {
   User,
   Phone,
   Sparkles,
+  Contact,
+  UserPlus,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
 import { Attachment, Person } from '../../types';
+import { useResponsive } from '../../lib/useResponsive';
+import { AddPersonModal } from './AddPersonModal';
+import {
+  pickContactFromDevice,
+  findDuplicatePerson,
+} from '../../lib/contactPicker';
 
 interface QuickAddModalProps {
   visible: boolean;
@@ -52,6 +60,9 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     addPerson,
   } = useWallet();
 
+  const { isNarrowMobile, isTablet, isDesktop } = useResponsive();
+  const isWide = isTablet || isDesktop;
+
   const [mode, setMode] = useState<'income' | 'expense' | 'credit' | 'debt'>(initialMode);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
@@ -62,6 +73,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [isAddPersonModalOpen, setIsAddPersonModalOpen] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const now = new Date();
@@ -124,6 +136,41 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       }
     } else {
       setSelectedPersonId(null);
+    }
+  };
+
+  const handleImportDeviceContact = async () => {
+    try {
+      const result = await pickContactFromDevice();
+      if (result.success && result.contact) {
+        setPersonName(result.contact.name);
+        setPersonPhone(result.contact.phone);
+
+        const duplicate = findDuplicatePerson(
+          result.contact.name,
+          result.contact.phone,
+          people
+        );
+        if (duplicate) {
+          setSelectedPersonId(duplicate.id);
+          Alert.alert('Contact Selected', `Linked to existing Khata contact "${duplicate.name}".`);
+        } else {
+          // Auto-save in Khata Book for seamless relationship tracking
+          const created = addPerson({
+            name: result.contact.name,
+            phone: result.contact.phone,
+          });
+          setSelectedPersonId(created.id);
+          Alert.alert('Contact Added', `"${created.name}" saved to Khata Book and linked to this entry.`);
+        }
+      } else if (!result.cancelled && result.error) {
+        Alert.alert('Contacts Notice', result.error);
+      }
+    } catch (err) {
+      Alert.alert(
+        'Contacts',
+        'Could not access phone contacts. Please enter name and phone manually.'
+      );
     }
   };
 
@@ -331,8 +378,14 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
   return (
     <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.backdrop}>
-        <View style={styles.modalCard}>
+      <View style={[styles.backdrop, isWide && styles.backdropWide]}>
+        <View
+          style={[
+            styles.modalCard,
+            isWide && styles.modalCardWide,
+            isNarrowMobile && styles.modalCardNarrow,
+          ]}
+        >
           {/* Header */}
           <View style={styles.modalHeader}>
             <View>
@@ -414,6 +467,28 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                       ? 'PERSON NAME (WHO RECEIVED MONEY?) *'
                       : 'PERSON NAME (WHO LENT YOU MONEY?) *'}
                   </Text>
+
+                  {/* Contact Action Buttons */}
+                  <View style={styles.personActionRow}>
+                    <TouchableOpacity
+                      style={styles.personActionBtn}
+                      onPress={handleImportDeviceContact}
+                      activeOpacity={0.7}
+                    >
+                      <Contact size={14} color={colors.brand[700]} />
+                      <Text style={styles.personActionBtnText}>Select from Contacts</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.personActionBtn, styles.personActionBtnSecondary]}
+                      onPress={() => setIsAddPersonModalOpen(true)}
+                      activeOpacity={0.7}
+                    >
+                      <UserPlus size={14} color={colors.slate[700]} />
+                      <Text style={styles.personActionBtnTextDark}>+ Add New Person</Text>
+                    </TouchableOpacity>
+                  </View>
+
                   <View style={styles.personInputContainer}>
                     <User size={16} color={colors.slate[400]} style={styles.inputLeftIcon} />
                     <TextInput
@@ -745,6 +820,14 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
           </TouchableOpacity>
         </View>
       </View>
+
+      <AddPersonModal
+        visible={isAddPersonModalOpen}
+        onClose={() => setIsAddPersonModalOpen(false)}
+        onPersonAdded={(p) => {
+          handleSelectPerson(p);
+        }}
+      />
     </Modal>
   );
 };
@@ -755,6 +838,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backdrop,
     justifyContent: 'flex-end',
   },
+  backdropWide: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
   modalCard: {
     backgroundColor: colors.white,
     borderTopLeftRadius: 28,
@@ -762,6 +850,23 @@ const styles = StyleSheet.create({
     maxHeight: '92%',
     padding: 20,
     paddingBottom: 32,
+  },
+  modalCardWide: {
+    width: '100%',
+    maxWidth: 540,
+    borderRadius: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '88%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  modalCardNarrow: {
+    padding: 14,
+    paddingBottom: 24,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -849,6 +954,39 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 13,
     color: colors.slate[900],
+  },
+  personActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  personActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brand[50],
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+    borderRadius: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  personActionBtnSecondary: {
+    backgroundColor: colors.slate[100],
+    borderColor: colors.slate[300],
+  },
+  personActionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.brand[800],
+  },
+  personActionBtnTextDark: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.slate[800],
   },
   personInputContainer: {
     flexDirection: 'row',

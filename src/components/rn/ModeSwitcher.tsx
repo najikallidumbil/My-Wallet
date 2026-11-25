@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { TrendingUp, Users, PieChart } from 'lucide-react-native';
 import { colors } from '../../theme/colors';
 import { AppMode } from '../../types';
+import { useResponsive } from '../../lib/useResponsive';
 
 interface ModeSwitcherProps {
   currentMode: AppMode;
@@ -10,25 +11,30 @@ interface ModeSwitcherProps {
 }
 
 export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ currentMode, onSelectMode }) => {
+  const { isNarrowMobile } = useResponsive();
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isNarrowMobile && styles.containerNarrow]}>
       <TouchableOpacity
         style={[
           styles.tab,
+          isNarrowMobile && styles.tabNarrow,
           currentMode === 'income_expense' && styles.tabActiveIncome,
         ]}
         onPress={() => onSelectMode('income_expense')}
         activeOpacity={0.7}
       >
         <TrendingUp
-          size={16}
+          size={isNarrowMobile ? 14 : 16}
           color={currentMode === 'income_expense' ? colors.income.text : colors.slate[500]}
         />
         <Text
           style={[
             styles.tabText,
+            isNarrowMobile && styles.tabTextNarrow,
             currentMode === 'income_expense' && styles.tabTextIncome,
           ]}
+          numberOfLines={1}
         >
           Finance
         </Text>
@@ -37,42 +43,48 @@ export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ currentMode, onSelec
       <TouchableOpacity
         style={[
           styles.tab,
+          isNarrowMobile && styles.tabNarrow,
           currentMode === 'khata_book' && styles.tabActiveKhata,
         ]}
         onPress={() => onSelectMode('khata_book')}
         activeOpacity={0.7}
       >
         <Users
-          size={16}
+          size={isNarrowMobile ? 14 : 16}
           color={currentMode === 'khata_book' ? colors.receivable.text : colors.slate[500]}
         />
         <Text
           style={[
             styles.tabText,
+            isNarrowMobile && styles.tabTextNarrow,
             currentMode === 'khata_book' && styles.tabTextKhata,
           ]}
+          numberOfLines={1}
         >
-          Khata Book
+          Khata
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         style={[
           styles.tab,
+          isNarrowMobile && styles.tabNarrow,
           currentMode === 'financial_overview' && styles.tabActiveOverview,
         ]}
         onPress={() => onSelectMode('financial_overview')}
         activeOpacity={0.7}
       >
         <PieChart
-          size={16}
+          size={isNarrowMobile ? 14 : 16}
           color={currentMode === 'financial_overview' ? colors.overview.text : colors.slate[500]}
         />
         <Text
           style={[
             styles.tabText,
+            isNarrowMobile && styles.tabTextNarrow,
             currentMode === 'financial_overview' && styles.tabTextOverview,
           ]}
+          numberOfLines={1}
         >
           Overview
         </Text>
@@ -91,6 +103,11 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     gap: 4,
   },
+  containerNarrow: {
+    marginHorizontal: 10,
+    marginVertical: 6,
+    padding: 3,
+  },
   tab: {
     flex: 1,
     flexDirection: 'row',
@@ -99,6 +116,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     gap: 6,
+  },
+  tabNarrow: {
+    paddingVertical: 7,
+    gap: 4,
   },
   tabActiveIncome: {
     backgroundColor: colors.white,
@@ -128,6 +149,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.slate[500],
+  },
+  tabTextNarrow: {
+    fontSize: 11,
   },
   tabTextIncome: {
     color: colors.income.text,

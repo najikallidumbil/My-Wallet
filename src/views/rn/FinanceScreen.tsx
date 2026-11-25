@@ -15,6 +15,12 @@ import {
   MinusCircle,
   Paperclip,
   Search,
+  Target,
+  AlertTriangle,
+  AlertCircle,
+  Edit3,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
@@ -23,6 +29,10 @@ import { formatDate } from '../../lib/date';
 import { MetricCard } from '../../components/rn/MetricCard';
 import { CategoryIcon } from '../../components/rn/CategoryIcon';
 import { Transaction } from '../../types';
+import { useResponsive } from '../../lib/useResponsive';
+import { IncomeExpenseBarChart } from '../../components/rn/charts/IncomeExpenseBarChart';
+import { CashFlowLineChart } from '../../components/rn/charts/CashFlowLineChart';
+import { BudgetModal } from '../../components/rn/BudgetModal';
 
 interface FinanceScreenProps {
   onAddIncome: () => void;
@@ -41,13 +51,41 @@ export const FinanceScreen: React.FC<FinanceScreenProps> = ({
     accounts,
     incomeExpenseSummary,
     budgetSummary,
+    selectedBudgetMonth,
+    setSelectedBudgetMonth,
   } = useWallet();
 
+  const { isNarrowMobile, isTablet, isDesktop } = useResponsive();
+  const isWide = isTablet || isDesktop;
+
+  const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   const { totalIncome, totalExpense, availableCashBalance } = incomeExpenseSummary;
-  const { totalBudget, remainingBudget, percentage: spentPercentage } = budgetSummary;
+  const { totalBudget, totalSpent, remainingBudget, percentage: spentPercentage } = budgetSummary;
+
+  const getMonthLabel = (monthStr: string) => {
+    try {
+      const [year, month] = monthStr.split('-');
+      const d = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+      return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    } catch {
+      return monthStr;
+    }
+  };
+
+  const handlePrevMonth = () => {
+    const [year, month] = selectedBudgetMonth.split('-').map(Number);
+    const d = new Date(year, month - 2, 1);
+    setSelectedBudgetMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  };
+
+  const handleNextMonth = () => {
+    const [year, month] = selectedBudgetMonth.split('-').map(Number);
+    const d = new Date(year, month, 1);
+    setSelectedBudgetMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  };
 
   // Filtered transactions for Mode 1 (Mode 1 must only display income & expense)
   const filteredTransactions = useMemo(() => {
@@ -69,249 +107,377 @@ export const FinanceScreen: React.FC<FinanceScreenProps> = ({
   const getAccount = (id?: string) => accounts.find((a) => a.id === id);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* 1. Main Available Balance Card */}
-      <View style={styles.mainBalanceCard}>
-        <View style={styles.balanceHeader}>
-          <Text style={styles.balanceLabel}>AVAILABLE CASH BALANCE</Text>
-          <View style={styles.balancePill}>
-            <Wallet size={12} color={colors.income.text} />
-            <Text style={styles.balancePillText}>Physical Cash</Text>
-          </View>
-        </View>
-        <Text style={styles.balanceAmount}>{formatRupees(availableCashBalance)}</Text>
-        <Text style={styles.balanceSubtitle}>
-          Opening Balance + Total Income - Total Expense
-        </Text>
-      </View>
-
-      {/* 2. Quick Action Buttons */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.incomeBtn]}
-          onPress={onAddIncome}
-          activeOpacity={0.8}
-        >
-          <PlusCircle size={18} color={colors.white} />
-          <Text style={styles.actionBtnText}>Add Income</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.expenseBtn]}
-          onPress={onAddExpense}
-          activeOpacity={0.8}
-        >
-          <MinusCircle size={18} color={colors.white} />
-          <Text style={styles.actionBtnText}>Add Expense</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* 3. Income & Expense Dual Metric Cards */}
-      <View style={styles.gridRow}>
-        <View style={styles.gridCol}>
-          <MetricCard
-            title="Total Income"
-            amount={totalIncome}
-            variant="income"
-            subtitle="Money received"
-            icon={<TrendingUp size={16} color={colors.income.text} />}
-          />
-        </View>
-        <View style={styles.gridCol}>
-          <MetricCard
-            title="Total Expense"
-            amount={totalExpense}
-            variant="expense"
-            subtitle="Money spent"
-            icon={<TrendingDown size={16} color={colors.expense.text} />}
-          />
-        </View>
-      </View>
-
-      {/* 4. Monthly Budget Progress Card */}
-      {totalBudget > 0 && (
-        <View style={styles.budgetCard}>
-          <View style={styles.budgetHeader}>
-            <View>
-              <Text style={styles.budgetTitle}>Monthly Budget Cap</Text>
-              <Text style={styles.budgetSub}>
-                Remaining: {formatRupees(remainingBudget)}
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.budgetBadge,
-                spentPercentage >= 100
-                  ? styles.budgetBadgeDanger
-                  : spentPercentage >= 80
-                  ? styles.budgetBadgeWarning
-                  : styles.budgetBadgeNormal,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.budgetBadgeText,
-                  spentPercentage >= 100
-                    ? styles.budgetBadgeTextDanger
-                    : spentPercentage >= 80
-                    ? styles.budgetBadgeTextWarning
-                    : styles.budgetBadgeTextNormal,
-                ]}
-              >
-                {Math.round(spentPercentage)}% Used
-              </Text>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        { padding: isNarrowMobile ? 12 : 16 },
+        isWide && styles.contentWide,
+      ]}
+    >
+      <View style={isWide ? styles.innerWide : styles.inner}>
+        {/* 1. Main Available Balance Card */}
+        <View style={styles.mainBalanceCard}>
+          <View style={styles.balanceHeader}>
+            <Text style={styles.balanceLabel}>AVAILABLE CASH BALANCE</Text>
+            <View style={styles.balancePill}>
+              <Wallet size={12} color={colors.income.text} />
+              <Text style={styles.balancePillText}>Physical Cash</Text>
             </View>
           </View>
+          <Text
+            style={[styles.balanceAmount, isNarrowMobile && styles.balanceAmountSmall]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {formatRupees(availableCashBalance)}
+          </Text>
+          <Text style={styles.balanceSubtitle}>
+            Opening Balance + Total Income - Total Expense
+          </Text>
+        </View>
 
-          {/* Progress Bar */}
-          <View style={styles.progressBarBg}>
-            <View
-              style={[
-                styles.progressBarFill,
-                {
-                  width: `${Math.min(100, Math.max(2, spentPercentage))}%`,
-                  backgroundColor:
-                    spentPercentage >= 100
-                      ? colors.expense.solid
-                      : spentPercentage >= 80
-                      ? colors.payable.solid
-                      : colors.income.solid,
-                },
-              ]}
+        {/* 2. Quick Action Buttons */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.incomeBtn]}
+            onPress={onAddIncome}
+            activeOpacity={0.8}
+          >
+            <PlusCircle size={18} color={colors.white} />
+            <Text style={styles.actionBtnText}>Add Income</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.expenseBtn]}
+            onPress={onAddExpense}
+            activeOpacity={0.8}
+          >
+            <MinusCircle size={18} color={colors.white} />
+            <Text style={styles.actionBtnText}>Add Expense</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 3. Income & Expense Dual Metric Cards */}
+        <View style={isNarrowMobile ? styles.stackCol : styles.gridRow}>
+          <View style={styles.gridCol}>
+            <MetricCard
+              title="Total Income"
+              amount={totalIncome}
+              variant="income"
+              subtitle="Money received"
+              icon={<TrendingUp size={16} color={colors.income.text} />}
+            />
+          </View>
+          <View style={styles.gridCol}>
+            <MetricCard
+              title="Total Expense"
+              amount={totalExpense}
+              variant="expense"
+              subtitle="Money spent"
+              icon={<TrendingDown size={16} color={colors.expense.text} />}
             />
           </View>
         </View>
-      )}
 
-      {/* 5. Filter & Search Bar */}
-      <View style={styles.filterSection}>
-        <View style={styles.searchBox}>
-          <Search size={16} color={colors.slate[400]} />
-          <TextInput
-            placeholder="Search transactions..."
-            placeholderTextColor={colors.slate[400]}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            style={styles.searchInput}
-          />
-        </View>
+        {/* 4. Monthly Budget Section (Fully Editable, with 80% & 100% Alerts) */}
+        {totalBudget === 0 ? (
+          <View style={styles.budgetEmptyCard}>
+            <View style={styles.budgetEmptyHeader}>
+              <View style={styles.budgetEmptyIcon}>
+                <Target size={22} color={colors.brand[600]} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.budgetEmptyTitle}>Set Your Monthly Budget</Text>
+                <Text style={styles.budgetEmptySub}>
+                  Set an expense target for {getMonthLabel(selectedBudgetMonth)} to track spending limits and get warnings.
+                </Text>
+              </View>
+            </View>
 
-        <View style={styles.filterTabs}>
-          <TouchableOpacity
-            style={[styles.filterTab, filterType === 'all' && styles.filterTabActive]}
-            onPress={() => setFilterType('all')}
-          >
-            <Text
-              style={[
-                styles.filterTabText,
-                filterType === 'all' && styles.filterTabTextActive,
-              ]}
-            >
-              All ({transactions.length})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterTab, filterType === 'income' && styles.filterTabActive]}
-            onPress={() => setFilterType('income')}
-          >
-            <Text
-              style={[
-                styles.filterTabText,
-                filterType === 'income' && styles.filterTabTextActive,
-              ]}
-            >
-              Income
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterTab, filterType === 'expense' && styles.filterTabActive]}
-            onPress={() => setFilterType('expense')}
-          >
-            <Text
-              style={[
-                styles.filterTabText,
-                filterType === 'expense' && styles.filterTabTextActive,
-              ]}
-            >
-              Expense
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+            <View style={styles.budgetEmptyActionRow}>
+              <View style={styles.budgetMonthPill}>
+                <TouchableOpacity onPress={handlePrevMonth} style={styles.monthPillBtn} activeOpacity={0.7}>
+                  <ChevronLeft size={16} color={colors.slate[600]} />
+                </TouchableOpacity>
+                <Text style={styles.monthPillText}>{getMonthLabel(selectedBudgetMonth)}</Text>
+                <TouchableOpacity onPress={handleNextMonth} style={styles.monthPillBtn} activeOpacity={0.7}>
+                  <ChevronRight size={16} color={colors.slate[600]} />
+                </TouchableOpacity>
+              </View>
 
-      {/* 6. Recent Transactions List */}
-      <View style={styles.txListContainer}>
-        <Text style={styles.sectionTitle}>
-          Transactions ({filteredTransactions.length})
-        </Text>
-
-        {filteredTransactions.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              {transactions.length === 0
-                ? 'No transactions recorded yet. Tap "Add Income" or "Add Expense" to get started.'
-                : 'No transactions matched your active filters.'}
-            </Text>
+              <TouchableOpacity
+                style={styles.setBudgetBtn}
+                onPress={() => setIsBudgetModalOpen(true)}
+                activeOpacity={0.8}
+              >
+                <Target size={15} color={colors.white} />
+                <Text style={styles.setBudgetBtnText}>Set Monthly Budget</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ) : (
-          filteredTransactions.map((tx) => {
-            const isInc = tx.type === 'income';
-            const cat = getCategory(tx.categoryId);
-            const acc = getAccount(tx.accountId);
+          <View style={styles.budgetCard}>
+            <View style={styles.budgetHeader}>
+              <View style={styles.budgetMonthControl}>
+                <TouchableOpacity onPress={handlePrevMonth} style={styles.monthPillBtn} activeOpacity={0.7}>
+                  <ChevronLeft size={16} color={colors.slate[700]} />
+                </TouchableOpacity>
+                <Text style={styles.budgetTitle}>{getMonthLabel(selectedBudgetMonth)} Budget</Text>
+                <TouchableOpacity onPress={handleNextMonth} style={styles.monthPillBtn} activeOpacity={0.7}>
+                  <ChevronRight size={16} color={colors.slate[700]} />
+                </TouchableOpacity>
+              </View>
 
-            return (
-              <TouchableOpacity
-                key={tx.id}
-                style={styles.txItem}
-                onPress={() => onSelectTransaction(tx)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.txLeft}>
-                  <View
-                    style={[
-                      styles.txIconBox,
-                      { backgroundColor: cat?.color ? `${cat.color}15` : colors.slate[100] },
-                    ]}
-                  >
-                    <CategoryIcon
-                      name={cat?.icon}
-                      size={18}
-                      color={cat?.color || colors.slate[600]}
-                    />
-                  </View>
-                  <View style={styles.txInfo}>
-                    <Text style={styles.txTitle} numberOfLines={1}>
-                      {tx.title}
-                    </Text>
-                    <View style={styles.txMeta}>
-                      <Text style={styles.txDate}>{formatDate(tx.transactionDate)}</Text>
-                      {tx.transactionTime && (
-                        <Text style={styles.txMetaDot}>• {tx.transactionTime}</Text>
-                      )}
-                      {acc && <Text style={styles.txMetaDot}>• {acc.name}</Text>}
-                      {tx.attachments && tx.attachments.length > 0 && (
-                        <View style={styles.attachPill}>
-                          <Paperclip size={10} color={colors.slate[500]} />
-                          <Text style={styles.attachText}>{tx.attachments.length}</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </View>
-
-                <Text
+              <View style={styles.budgetHeaderRight}>
+                <View
                   style={[
-                    styles.txAmount,
-                    isInc ? styles.txAmountIncome : styles.txAmountExpense,
+                    styles.budgetBadge,
+                    spentPercentage >= 100
+                      ? styles.budgetBadgeDanger
+                      : spentPercentage >= 80
+                      ? styles.budgetBadgeWarning
+                      : styles.budgetBadgeNormal,
                   ]}
                 >
-                  {isInc ? '+' : '-'} {formatRupees(tx.amount)}
+                  <Text
+                    style={[
+                      styles.budgetBadgeText,
+                      spentPercentage >= 100
+                        ? styles.budgetBadgeTextDanger
+                        : spentPercentage >= 80
+                        ? styles.budgetBadgeTextWarning
+                        : styles.budgetBadgeTextNormal,
+                    ]}
+                  >
+                    {Math.round(spentPercentage)}% Used
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.editBudgetIconBtn}
+                  onPress={() => setIsBudgetModalOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <Edit3 size={15} color={colors.brand[600]} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* 4 Values: Monthly Budget, Total Expenses, Remaining Budget, Percentage Used */}
+            <View style={styles.budgetMetricsRow}>
+              <View style={styles.budgetMetricItem}>
+                <Text style={styles.budgetMetricLabel}>Monthly Budget</Text>
+                <Text style={styles.budgetMetricVal}>{formatRupees(totalBudget)}</Text>
+              </View>
+              <View style={styles.budgetMetricItem}>
+                <Text style={styles.budgetMetricLabel}>Total Expenses</Text>
+                <Text style={[styles.budgetMetricVal, { color: colors.expense.text }]}>
+                  {formatRupees(totalSpent)}
                 </Text>
-              </TouchableOpacity>
-            );
-          })
+              </View>
+              <View style={styles.budgetMetricItem}>
+                <Text style={styles.budgetMetricLabel}>Remaining</Text>
+                <Text
+                  style={[
+                    styles.budgetMetricVal,
+                    { color: remainingBudget >= 0 ? colors.income.text : colors.expense.text },
+                  ]}
+                >
+                  {formatRupees(remainingBudget)}
+                </Text>
+              </View>
+              <View style={styles.budgetMetricItem}>
+                <Text style={styles.budgetMetricLabel}>Used</Text>
+                <Text style={styles.budgetMetricVal}>{Math.round(spentPercentage)}%</Text>
+              </View>
+            </View>
+
+            {/* Progress Bar */}
+            <View style={styles.progressBarBg}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  {
+                    width: `${Math.min(100, Math.max(2, spentPercentage))}%`,
+                    backgroundColor:
+                      spentPercentage >= 100
+                        ? colors.expense.solid
+                        : spentPercentage >= 80
+                        ? colors.payable.solid
+                        : colors.income.solid,
+                  },
+                ]}
+              />
+            </View>
+
+            {/* Threshold Warnings */}
+            {spentPercentage >= 100 && (
+              <View style={styles.budgetAlertDanger}>
+                <AlertCircle size={14} color={colors.expense.text} />
+                <Text style={styles.budgetAlertTextDanger}>
+                  Budget Exceeded: Over budget by {formatRupees(Math.abs(remainingBudget))}
+                </Text>
+              </View>
+            )}
+            {spentPercentage >= 80 && spentPercentage < 100 && (
+              <View style={styles.budgetAlertWarning}>
+                <AlertTriangle size={14} color={colors.payable.text} />
+                <Text style={styles.budgetAlertTextWarning}>
+                  Budget Alert: 80%+ limit reached. Remaining: {formatRupees(remainingBudget)}
+                </Text>
+              </View>
+            )}
+          </View>
         )}
+
+        {/* 5. Responsive Charts */}
+        <View style={isWide ? styles.chartGrid2Col : styles.stackCol}>
+          <View style={styles.gridCol}>
+            <IncomeExpenseBarChart transactions={transactions} />
+          </View>
+          <View style={styles.gridCol}>
+            <CashFlowLineChart transactions={transactions} initialBalance={availableCashBalance} />
+          </View>
+        </View>
+
+        {/* 6. Filter & Search Bar */}
+        <View style={styles.filterSection}>
+          <View style={styles.searchBox}>
+            <Search size={16} color={colors.slate[400]} />
+            <TextInput
+              placeholder="Search transactions..."
+              placeholderTextColor={colors.slate[400]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={styles.searchInput}
+            />
+          </View>
+
+          <View style={styles.filterTabs}>
+            <TouchableOpacity
+              style={[styles.filterTab, filterType === 'all' && styles.filterTabActive]}
+              onPress={() => setFilterType('all')}
+            >
+              <Text
+                style={[
+                  styles.filterTabText,
+                  filterType === 'all' && styles.filterTabTextActive,
+                ]}
+              >
+                All ({transactions.length})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filterTab, filterType === 'income' && styles.filterTabActive]}
+              onPress={() => setFilterType('income')}
+            >
+              <Text
+                style={[
+                  styles.filterTabText,
+                  filterType === 'income' && styles.filterTabTextActive,
+                ]}
+              >
+                Income
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filterTab, filterType === 'expense' && styles.filterTabActive]}
+              onPress={() => setFilterType('expense')}
+            >
+              <Text
+                style={[
+                  styles.filterTabText,
+                  filterType === 'expense' && styles.filterTabTextActive,
+                ]}
+              >
+                Expense
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 7. Recent Transactions List */}
+        <View style={styles.txListContainer}>
+          <Text style={styles.sectionTitle}>
+            Transactions ({filteredTransactions.length})
+          </Text>
+
+          {filteredTransactions.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                {transactions.length === 0
+                  ? 'No transactions recorded yet. Tap "Add Income" or "Add Expense" to get started.'
+                  : 'No transactions matched your active filters.'}
+              </Text>
+            </View>
+          ) : (
+            filteredTransactions.map((tx) => {
+              const isInc = tx.type === 'income';
+              const cat = getCategory(tx.categoryId);
+              const acc = getAccount(tx.accountId);
+
+              return (
+                <TouchableOpacity
+                  key={tx.id}
+                  style={styles.txItem}
+                  onPress={() => onSelectTransaction(tx)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.txLeft}>
+                    <View
+                      style={[
+                        styles.txIconBox,
+                        { backgroundColor: cat?.color ? `${cat.color}15` : colors.slate[100] },
+                      ]}
+                    >
+                      <CategoryIcon
+                        name={cat?.icon}
+                        size={18}
+                        color={cat?.color || colors.slate[600]}
+                      />
+                    </View>
+                    <View style={styles.txInfo}>
+                      <Text style={styles.txTitle} numberOfLines={1}>
+                        {tx.title}
+                      </Text>
+                      <View style={styles.txMeta}>
+                        <Text style={styles.txDate}>{formatDate(tx.transactionDate)}</Text>
+                        {tx.transactionTime && (
+                          <Text style={styles.txMetaDot}>• {tx.transactionTime}</Text>
+                        )}
+                        {acc && <Text style={styles.txMetaDot}>• {acc.name}</Text>}
+                        {tx.attachments && tx.attachments.length > 0 && (
+                          <View style={styles.attachPill}>
+                            <Paperclip size={10} color={colors.slate[500]} />
+                            <Text style={styles.attachText}>{tx.attachments.length}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.txAmount,
+                      isInc ? styles.txAmountIncome : styles.txAmountExpense,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {isInc ? '+' : '-'} {formatRupees(tx.amount)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
       </View>
+
+      <BudgetModal
+        visible={isBudgetModalOpen}
+        onClose={() => setIsBudgetModalOpen(false)}
+        initialMonth={selectedBudgetMonth}
+      />
     </ScrollView>
   );
 };
@@ -322,9 +488,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.slate[50],
   },
   content: {
-    padding: 16,
     paddingBottom: 90,
+  },
+  contentWide: {
+    alignItems: 'center',
+  },
+  inner: {
+    width: '100%',
     gap: 14,
+  },
+  innerWide: {
+    width: '100%',
+    maxWidth: 1100,
+    gap: 16,
   },
   mainBalanceCard: {
     backgroundColor: colors.white,
@@ -370,6 +546,9 @@ const styles = StyleSheet.create({
     color: colors.slate[900],
     letterSpacing: -1,
   },
+  balanceAmountSmall: {
+    fontSize: 24,
+  },
   balanceSubtitle: {
     fontSize: 11,
     color: colors.slate[400],
@@ -405,11 +584,158 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
+  stackCol: {
+    gap: 12,
+  },
   gridRow: {
     flexDirection: 'row',
     gap: 12,
   },
+  chartGrid2Col: {
+    flexDirection: 'row',
+    gap: 14,
+  },
   gridCol: {
+    flex: 1,
+  },
+  budgetEmptyCard: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    borderStyle: 'dashed',
+    gap: 14,
+  },
+  budgetEmptyHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  budgetEmptyIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: colors.brand[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  budgetEmptyTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.slate[900],
+  },
+  budgetEmptySub: {
+    fontSize: 12,
+    color: colors.slate[500],
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  budgetEmptyActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  budgetMonthPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.slate[100],
+    borderRadius: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  monthPillBtn: {
+    padding: 6,
+  },
+  monthPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.slate[700],
+    paddingHorizontal: 4,
+  },
+  setBudgetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.brand[600],
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 12,
+    gap: 6,
+  },
+  setBudgetBtnText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  budgetMonthControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  budgetHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editBudgetIconBtn: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.brand[50],
+  },
+  budgetMetricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.slate[50],
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 10,
+  },
+  budgetMetricItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  budgetMetricLabel: {
+    fontSize: 10,
+    color: colors.slate[500],
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  budgetMetricVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.slate[800],
+  },
+  budgetAlertDanger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.expense.bg,
+    borderRadius: 10,
+    padding: 8,
+    gap: 6,
+    marginTop: 8,
+  },
+  budgetAlertTextDanger: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.expense.text,
+    flex: 1,
+  },
+  budgetAlertWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.payable.bg,
+    borderRadius: 10,
+    padding: 8,
+    gap: 6,
+    marginTop: 8,
+  },
+  budgetAlertTextWarning: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.payable.text,
     flex: 1,
   },
   budgetCard: {
@@ -452,7 +778,7 @@ const styles = StyleSheet.create({
   },
   budgetBadgeText: {
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   budgetBadgeTextNormal: {
     color: colors.income.text,
@@ -474,84 +800,98 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   filterSection: {
-    gap: 8,
+    gap: 10,
   },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.white,
     borderRadius: 14,
+    paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: colors.slate[200],
-    paddingHorizontal: 12,
     gap: 8,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 9,
+    paddingVertical: 10,
     fontSize: 13,
     color: colors.slate[900],
   },
   filterTabs: {
     flexDirection: 'row',
-    gap: 8,
+    backgroundColor: colors.slate[200],
+    borderRadius: 12,
+    padding: 3,
+    gap: 2,
   },
   filterTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: colors.slate[200],
   },
   filterTabActive: {
-    backgroundColor: colors.brand[600],
+    backgroundColor: colors.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
   },
   filterTabText: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.slate[600],
   },
   filterTabTextActive: {
-    color: colors.white,
+    fontWeight: '800',
+    color: colors.slate[900],
   },
   txListContainer: {
-    backgroundColor: colors.white,
-    borderRadius: 22,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.slate[200],
+    gap: 10,
   },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '800',
     color: colors.slate[900],
-    marginBottom: 12,
   },
   emptyContainer: {
-    paddingVertical: 32,
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.slate[200],
   },
   emptyText: {
     fontSize: 12,
     color: colors.slate[400],
     textAlign: 'center',
     lineHeight: 18,
-    paddingHorizontal: 20,
   },
   txItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.slate[100],
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.slate[100],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.02,
+    shadowRadius: 2,
+    elevation: 1,
+    gap: 8,
   },
   txLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     flex: 1,
-    paddingRight: 8,
   },
   txIconBox: {
     width: 38,
@@ -571,16 +911,17 @@ const styles = StyleSheet.create({
   txMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    marginTop: 2,
     gap: 4,
+    marginTop: 2,
+    flexWrap: 'wrap',
   },
   txDate: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.slate[400],
+    fontWeight: '500',
   },
   txMetaDot: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.slate[400],
   },
   attachPill: {
@@ -593,7 +934,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   attachText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     color: colors.slate[600],
   },

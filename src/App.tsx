@@ -4,7 +4,9 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WalletProvider, useWallet } from './context/WalletContext';
+import { SecurityProvider, useSecurity } from './context/SecurityContext';
 import { AuthScreen } from './components/auth/AuthScreen';
+import { AppLockScreen } from './components/security/AppLockScreen';
 import { colors } from './theme/colors';
 import { Header } from './components/rn/Header';
 import { ModeSwitcher } from './components/rn/ModeSwitcher';
@@ -22,6 +24,9 @@ import { AddAccountModal } from './components/rn/AddAccountModal';
 import { SettingsModal } from './components/rn/SettingsModal';
 import { TransactionDetailsModal } from './components/rn/TransactionDetailsModal';
 import { AddPersonModal } from './components/rn/AddPersonModal';
+import { DesktopSidebar } from './components/rn/DesktopSidebar';
+import { MobileBottomNav } from './components/rn/MobileBottomNav';
+import { useResponsive } from './lib/useResponsive';
 import { Transaction, PersonSummary } from './types';
 
 const MainScreen: React.FC = () => {
@@ -31,7 +36,12 @@ const MainScreen: React.FC = () => {
     setCurrentMode,
     reminderModalRecord,
     closeReminderModal,
+    khataSummary,
+    personSummaries,
   } = useWallet();
+
+  const { isMobile, isTablet, isDesktop } = useResponsive();
+  const isWide = isTablet || isDesktop;
 
   // Modals state
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
@@ -70,70 +80,97 @@ const MainScreen: React.FC = () => {
     setIsQuickAddOpen(true);
   };
 
+  const handleFabPress = () => {
+    if (currentMode === 'income_expense') {
+      handleOpenQuickAdd('expense');
+    } else if (currentMode === 'khata_book') {
+      handleOpenQuickAdd('credit');
+    } else {
+      setIsTypeSelectorOpen(true);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <StatusBar style="dark" />
 
-      {/* Top Header */}
-      <Header
-        currentMode={currentMode}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-      />
-
-      {/* 3-Mode Primary Switcher */}
-      <ModeSwitcher
-        currentMode={currentMode}
-        onSelectMode={(mode) => setCurrentMode(mode)}
-      />
-
-      {/* Main View for Active Mode */}
-      <View style={styles.content}>
-        {currentMode === 'income_expense' && (
-          <FinanceScreen
-            onAddIncome={() => handleOpenQuickAdd('income')}
-            onAddExpense={() => handleOpenQuickAdd('expense')}
-            onSelectTransaction={(tx) => setSelectedTx(tx)}
+      <View style={[styles.mainLayout, isWide && styles.mainLayoutWide]}>
+        {/* Desktop / Tablet Sidebar Navigation */}
+        {isWide && (
+          <DesktopSidebar
+            currentMode={currentMode}
+            onSelectMode={(mode) => setCurrentMode(mode)}
+            onOpenQuickAdd={() => setIsTypeSelectorOpen(true)}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
         )}
 
-        {currentMode === 'khata_book' && (
-          <KhataScreen
-            onLendMoney={() => handleOpenQuickAdd('credit')}
-            onReceiveMoney={() => {
-              setKhataSettleMode('receive');
-              setIsKhataSettleOpen(true);
-            }}
-            onBorrowMoney={() => handleOpenQuickAdd('debt')}
-            onRepayMoney={() => {
-              setKhataSettleMode('repay');
-              setIsKhataSettleOpen(true);
-            }}
-            onAddPerson={() => setIsAddPersonOpen(true)}
-            onSelectPerson={(p) => setSelectedPerson(p)}
+        {/* Content Pane */}
+        <View style={styles.rightPane}>
+          {/* Top Header */}
+          <Header
+            currentMode={currentMode}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
-        )}
 
-        {currentMode === 'financial_overview' && (
-          <OverviewScreen
-            onOpenTransfer={() => setIsTransferOpen(true)}
-            onAddAccount={() => setIsAddAccountOpen(true)}
+          {/* 3-Mode Primary Switcher (Rendered on Mobile, or as top breadcrumb on Desktop) */}
+          <ModeSwitcher
+            currentMode={currentMode}
+            onSelectMode={(mode) => setCurrentMode(mode)}
           />
-        )}
+
+          {/* Main View for Active Mode */}
+          <View style={styles.content}>
+            {currentMode === 'income_expense' && (
+              <FinanceScreen
+                onAddIncome={() => handleOpenQuickAdd('income')}
+                onAddExpense={() => handleOpenQuickAdd('expense')}
+                onSelectTransaction={(tx) => setSelectedTx(tx)}
+              />
+            )}
+
+            {currentMode === 'khata_book' && (
+              <KhataScreen
+                onLendMoney={() => handleOpenQuickAdd('credit')}
+                onReceiveMoney={() => {
+                  setKhataSettleMode('receive');
+                  setIsKhataSettleOpen(true);
+                }}
+                onBorrowMoney={() => handleOpenQuickAdd('debt')}
+                onRepayMoney={() => {
+                  setKhataSettleMode('repay');
+                  setIsKhataSettleOpen(true);
+                }}
+                onAddPerson={() => setIsAddPersonOpen(true)}
+                onSelectPerson={(p) => setSelectedPerson(p)}
+              />
+            )}
+
+            {currentMode === 'financial_overview' && (
+              <OverviewScreen
+                onOpenTransfer={() => setIsTransferOpen(true)}
+                onAddAccount={() => setIsAddAccountOpen(true)}
+              />
+            )}
+          </View>
+
+          {/* Mobile Bottom Navigation (Only on mobile width < 768px) */}
+          {isMobile && (
+            <MobileBottomNav
+              currentMode={currentMode}
+              onSelectMode={(mode) => setCurrentMode(mode)}
+              onOpenQuickAdd={handleFabPress}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              overdueCount={khataSummary.overdueCount}
+            />
+          )}
+        </View>
       </View>
 
-      {/* Floating Action Button */}
-      <FloatingAddButton
-        onPress={() => {
-          if (currentMode === 'income_expense') {
-            handleOpenQuickAdd('expense');
-          } else if (currentMode === 'khata_book') {
-            handleOpenQuickAdd('credit');
-          } else {
-            // In Combined Overview: open explicit 4-type selector modal
-            setIsTypeSelectorOpen(true);
-          }
-        }}
-      />
+      {/* Floating Action Button (Tablet/Desktop or fallback) */}
+      {!isMobile && (
+        <FloatingAddButton onPress={handleFabPress} />
+      )}
 
       {/* Modals */}
       <QuickAddModal
@@ -168,15 +205,23 @@ const MainScreen: React.FC = () => {
 
       <PersonLedgerModal
         visible={!!selectedPerson}
-        personSummary={selectedPerson}
+        personSummary={
+          selectedPerson
+            ? personSummaries.find((p) => p.id === selectedPerson.id) || selectedPerson
+            : null
+        }
         onClose={() => setSelectedPerson(null)}
-        onOpenQuickAdd={(mode) =>
+        onOpenQuickAdd={(mode, name, phone) =>
           handleOpenQuickAdd(
             mode,
-            selectedPerson?.name || '',
-            selectedPerson?.phone || ''
+            name || selectedPerson?.name || '',
+            phone || selectedPerson?.phone || ''
           )
         }
+        onOpenSettleModal={(mode) => {
+          setKhataSettleMode(mode);
+          setIsKhataSettleOpen(true);
+        }}
       />
 
       <TransferModal
@@ -210,8 +255,9 @@ const MainScreen: React.FC = () => {
 
 const AuthenticatedApp: React.FC = () => {
   const { user, isLoading, isGuestMode } = useAuth();
+  const { isLocked, isInitialized } = useSecurity();
 
-  if (isLoading) {
+  if (isLoading || !isInitialized) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.brand[600]} />
@@ -226,7 +272,12 @@ const AuthenticatedApp: React.FC = () => {
 
   return (
     <WalletProvider>
-      <MainScreen />
+      <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }} pointerEvents={isLocked ? 'none' : 'auto'}>
+          <MainScreen />
+        </View>
+        {isLocked && <AppLockScreen />}
+      </View>
     </WalletProvider>
   );
 };
@@ -235,7 +286,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <AuthenticatedApp />
+        <SecurityProvider>
+          <AuthenticatedApp />
+        </SecurityProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );
@@ -245,6 +298,17 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.white,
+  },
+  mainLayout: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  mainLayoutWide: {
+    flexDirection: 'row',
+  },
+  rightPane: {
+    flex: 1,
+    flexDirection: 'column',
   },
   content: {
     flex: 1,

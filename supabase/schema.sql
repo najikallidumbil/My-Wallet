@@ -8,6 +8,12 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- Grant schema privileges to API roles
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO anon, authenticated, service_role;
+
 -- ==============================================================================
 -- 2. CORE DATABASE TABLES
 -- Every user-data table includes: id, user_id, created_at, updated_at
@@ -192,6 +198,48 @@ CREATE TABLE IF NOT EXISTS public.recovery_verification_requests (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
+-- MESSAGE HISTORY TABLE
+CREATE TABLE IF NOT EXISTS public.message_history (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    person_id TEXT REFERENCES public.khata_people(id) ON DELETE SET NULL,
+    person_name TEXT NOT NULL,
+    recipient_phone TEXT,
+    message_content TEXT NOT NULL,
+    message_type TEXT NOT NULL CHECK (message_type IN (
+        'payment_reminder',
+        'due_date_reminder',
+        'overdue_reminder',
+        'payment_received',
+        'payment_made',
+        'personal'
+    )),
+    channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'sms', 'copied')),
+    status TEXT NOT NULL DEFAULT 'prepared' CHECK (status IN (
+        'prepared',
+        'opened_in_whatsapp',
+        'opened_in_sms',
+        'sent',
+        'delivered',
+        'failed'
+    )),
+    language TEXT NOT NULL DEFAULT 'en' CHECK (language IN ('en', 'ml')),
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- CLOUD WALLET BACKUPS TABLE
+CREATE TABLE IF NOT EXISTS public.wallet_backups (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    backup_name TEXT NOT NULL,
+    backup_type TEXT NOT NULL DEFAULT 'auto',
+    record_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+    data JSONB NOT NULL,
+    checksum TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
 -- ==============================================================================
 -- 3. INDEXES FOR PERFORMANCE
 -- ==============================================================================
@@ -290,6 +338,19 @@ CREATE POLICY "Users delete own attachments" ON public.attachments FOR DELETE US
 
 -- Recovery Requests
 CREATE POLICY "Users manage own recovery requests" ON public.recovery_verification_requests FOR ALL USING (auth.uid() = user_id);
+
+-- Message History
+ALTER TABLE public.message_history ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own message history" ON public.message_history FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Wallet Backups
+ALTER TABLE public.wallet_backups ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own wallet backups" ON public.wallet_backups FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Grant privileges on all existing tables
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
 
 -- ==============================================================================
 -- 5. AUTOMATIC TRIGGERS & PROCEDURES

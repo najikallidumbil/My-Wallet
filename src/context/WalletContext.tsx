@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   AppMode,
   Transaction,
@@ -24,6 +24,7 @@ import {
   BudgetSummary,
   SyncState,
   CloudBackupData,
+  MessageRecord,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
@@ -34,19 +35,28 @@ import {
   INITIAL_RECURRING,
   INITIAL_BUDGETS,
 } from '../data/defaultData';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, getSupabaseClient } from '../lib/supabase';
 import { getDueStatus } from '../lib/date';
 import { storage } from '../lib/storage';
 import { useAuth } from './AuthContext';
 import {
   fetchUserDataFromCloud,
   syncAllDataToCloud,
-  syncTransactionItem,
-  syncKhataItem,
-  syncPersonItem,
-  syncAccountItem,
-  syncTransferItem,
+  CloudPayload,
 } from '../services/cloudSync';
+import {
+  enqueueSyncItem,
+  processSyncQueue,
+  subscribeToSyncQueue,
+  clearSyncQueue,
+} from '../services/offlineSyncQueue';
+import {
+  createWalletBackup,
+  getBackupHistory,
+  getLastBackupTimestamp,
+  checkAndTriggerAutoBackup,
+  WalletBackupEntry,
+} from '../services/backupService';
 import {
   calculateIncomeExpenseSummary,
   calculateKhataSummary,
@@ -63,12 +73,20 @@ interface WalletContextType {
   // Cloud Sync & Data Migration
   syncState: SyncState;
   lastSyncedAt: string | null;
+  pendingSyncCount: number;
   hasUnmigratedLocalData: boolean;
   triggerManualSync: () => Promise<{ success: boolean; error?: string }>;
   migrateLocalDataToCloud: () => Promise<{ success: boolean; migratedCount: number; error?: string }>;
   exportAllDataJson: () => string;
   exportTransactionsCsv: () => string;
   restoreFromJsonBackup: (jsonString: string) => Promise<{ success: boolean; restoredCount: number; error?: string }>;
+
+  // Backups & Snapshots
+  triggerBackupNow: () => Promise<{ success: boolean; backup?: WalletBackupEntry; error?: string }>;
+  backupHistory: WalletBackupEntry[];
+  lastBackupTime: string | null;
+  refreshBackupHistory: () => Promise<void>;
+  restoreFromBackupEntry: (backup: WalletBackupEntry) => Promise<{ success: boolean; restoredCount: number; error?: string }>;
 
   // Modes & Navigation
   currentMode: AppMode;
@@ -90,6 +108,9 @@ interface WalletContextType {
   // Computed Summaries
   incomeExpenseSummary: IncomeExpenseSummary;
   budgetSummary: BudgetSummary;
+  selectedBudgetMonth: string;
+  setSelectedBudgetMonth: (month: string) => void;
+  getBudgetForMonth: (month: string) => BudgetSummary;
   khataSummary: KhataSummary;
   personSummaries: PersonSummary[];
   combinedFinancialSummary: CombinedFinancialSummary;
@@ -165,6 +186,14 @@ interface WalletContextType {
   addPerson: (data: Omit<Person, 'id' | 'createdAt'>) => Person;
   updatePerson: (id: string, updates: Partial<Person>) => void;
   deletePerson: (id: string) => void;
+  archivePerson: (id: string) => void;
+  unarchivePerson: (id: string) => void;
+
+  // Smart Messaging & Reminders
+  messageHistory: MessageRecord[];
+  logMessage: (record: Omit<MessageRecord, 'id' | 'createdAt'>) => Promise<MessageRecord>;
+  deleteMessageRecord: (id: string) => void;
+  clearMessageHistory: () => void;
 
   // Category Actions
   addCategory: (data: Omit<Category, 'id'>) => Category;
@@ -198,6 +227,7 @@ const STORAGE_KEYS = {
   PEOPLE: 'my_wallet_people_v3',
   RECURRING: 'my_wallet_recurring_v3',
   REMINDER_PREFS: 'my_wallet_reminder_prefs_v3',
+  MESSAGE_HISTORY: 'my_wallet_message_history_v3',
 };
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -239,6 +269,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Credit & Debt
   const [creditDebtRecords, setCreditDebtRecords] = useState<CreditDebtRecord[]>(INITIAL_CREDIT_DEBT);
 
+  // Message History
+  const [messageHistory, setMessageHistory] = useState<MessageRecord[]>([]);
+
   // UI Modal State
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [quickAddInitialMode, setQuickAddInitialMode] = useState<'income' | 'expense' | 'credit' | 'debt'>('expense');
@@ -253,9 +286,42 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Auth & Cloud Sync Integration
   const { user } = useAuth();
+  const activeUserIdRef = useRef<string | null>(null);
   const [syncState, setSyncState] = useState<SyncState>('synced');
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [hasUnmigratedLocalData, setHasUnmigratedLocalData] = useState<boolean>(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+
+  // Backup System State
+  const [backupHistory, setBackupHistoryState] = useState<WalletBackupEntry[]>([]);
+  const [lastBackupTime, setLastBackupTime] = useState<string | null>(null);
+
+  // Subscribe to offline sync queue
+  useEffect(() => {
+    const unsub = subscribeToSyncQueue((count, isSyncing) => {
+      setPendingSyncCount(count);
+      if (isSyncing) {
+        setSyncState('syncing');
+      } else if (count === 0) {
+        setSyncState('synced');
+      } else {
+        setSyncState('offline');
+      }
+    });
+    return unsub;
+  }, []);
+
+  // Refresh backup history
+  const refreshBackupHistory = useCallback(async () => {
+    const history = await getBackupHistory(user?.id);
+    const lastTime = await getLastBackupTimestamp(user?.id);
+    setBackupHistoryState(history);
+    setLastBackupTime(lastTime);
+  }, [user]);
+
+  useEffect(() => {
+    refreshBackupHistory();
+  }, [refreshBackupHistory]);
 
   const isSupabaseMode = isSupabaseConfigured();
 
@@ -435,6 +501,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           } catch (_) {}
         }
 
+        // 12. Message History
+        const mhStr = dataMap[STORAGE_KEYS.MESSAGE_HISTORY];
+        if (mhStr) {
+          try {
+            const parsed = JSON.parse(mhStr);
+            if (Array.isArray(parsed)) setMessageHistory(parsed);
+          } catch (_) {}
+        }
+
         // Clean legacy v1/v2 keys
         await storage.multiRemove([
           'my_wallet_transactions_v2',
@@ -460,61 +535,135 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, []);
 
-  // Cloud Sync on User Auth Change
+  // Cloud Sync on User Auth Change (Login, Logout, Account Switch)
   useEffect(() => {
-    const currentUserId = user?.id;
-    if (!isHydrated || !currentUserId) return;
+    if (!isHydrated) return;
+    const currentUserId = user?.id || null;
     let active = true;
 
+    // 1. Handle Logout: Immediately clear in-memory state so user records are not leaked
+    if (!currentUserId) {
+      if (activeUserIdRef.current !== null) {
+        activeUserIdRef.current = null;
+        setTransactions([]);
+        setCreditDebtRecords([]);
+        setPeople([]);
+        setAccounts(INITIAL_ACCOUNTS);
+        setBudgets([]);
+        setAccountTransfers([]);
+        setMessageHistory([]);
+        setOpeningBalanceState(0);
+        setSyncState('synced');
+        setLastSyncedAt(null);
+      }
+      return;
+    }
+
+    // 2. Handle Login / User Switch: Load from Cloud as Ground Truth
     async function syncOnLogin() {
       if (!currentUserId) return;
+
+      // If switching from another account or clean login, reset state first
+      if (activeUserIdRef.current !== currentUserId) {
+        activeUserIdRef.current = currentUserId;
+        setTransactions([]);
+        setCreditDebtRecords([]);
+        setPeople([]);
+        setAccounts(INITIAL_ACCOUNTS);
+        setBudgets([]);
+        setAccountTransfers([]);
+        setMessageHistory([]);
+        setOpeningBalanceState(0);
+      }
+
       setSyncState('syncing');
       try {
         const cloudData = await fetchUserDataFromCloud(currentUserId);
         if (!active) return;
 
-        if (cloudData && cloudData.hasData) {
-          setOpeningBalanceState(cloudData.openingBalance);
-          setAccounts(cloudData.accounts);
-          setAccountTransfers(cloudData.accountTransfers);
-          if (cloudData.categories.length > 0) setCategories(cloudData.categories);
-          if (cloudData.budgets.length > 0) setBudgets(cloudData.budgets);
-          setPeople(cloudData.people);
-          setCreditDebtRecords(cloudData.creditDebtRecords);
-          setTransactions(cloudData.transactions);
-          setReminderPreferences(cloudData.reminderPreferences);
-          setSyncState('synced');
-          setLastSyncedAt(new Date().toLocaleTimeString());
-          setHasUnmigratedLocalData(false);
-        } else {
-          const localCount = transactions.length + creditDebtRecords.length;
-          if (localCount > 0) {
-            setHasUnmigratedLocalData(true);
-            const syncRes = await syncAllDataToCloud(currentUserId, {
-              openingBalance,
-              accounts,
-              accountTransfers,
-              categories,
-              budgets,
-              people,
-              creditDebtRecords,
-              transactions,
-              recurringTransactions,
-              reminderPreferences,
-            });
-            if (syncRes.success) {
-              setSyncState('synced');
-              setLastSyncedAt(new Date().toLocaleTimeString());
-              setHasUnmigratedLocalData(false);
-            } else {
-              setSyncState('error');
+        if (!cloudData) {
+          // Cloud unreachable or offline: fallback to user-isolated offline cache
+          try {
+            const cachedRaw = await storage.getItem(`my_wallet_offline_cache_${currentUserId}`);
+            if (cachedRaw) {
+              const cached = JSON.parse(cachedRaw);
+              if (cached && active) {
+                if (Array.isArray(cached.transactions)) setTransactions(cached.transactions);
+                if (Array.isArray(cached.creditDebtRecords)) setCreditDebtRecords(cached.creditDebtRecords);
+                if (Array.isArray(cached.people)) setPeople(cached.people);
+                if (Array.isArray(cached.accounts) && cached.accounts.length > 0) setAccounts(cached.accounts);
+                if (Array.isArray(cached.budgets)) setBudgets(cached.budgets);
+                if (Array.isArray(cached.accountTransfers)) setAccountTransfers(cached.accountTransfers);
+                if (Array.isArray(cached.categories) && cached.categories.length > 0) setCategories(cached.categories);
+                if (Array.isArray(cached.messageHistory)) setMessageHistory(cached.messageHistory);
+                if (typeof cached.openingBalance === 'number') setOpeningBalanceState(cached.openingBalance);
+              }
             }
-          } else {
-            setSyncState('synced');
-            setLastSyncedAt(new Date().toLocaleTimeString());
-            setHasUnmigratedLocalData(false);
-          }
+          } catch (_) {}
+          setSyncState('offline');
+          return;
         }
+
+        // If there are permission or critical query errors:
+        if (cloudData.queryErrors && cloudData.queryErrors.length > 0) {
+          console.warn('Supabase cloud query errors reported:', cloudData.queryErrors);
+          setSyncState('error');
+          return;
+        }
+
+        // Supabase is the PRIMARY DATABASE: Populate directly from Cloud ground truth
+        setTransactions(cloudData.transactions);
+        setCreditDebtRecords(cloudData.creditDebtRecords);
+        setPeople(cloudData.people);
+        setAccounts(cloudData.accounts.length > 0 ? cloudData.accounts : INITIAL_ACCOUNTS);
+        setBudgets(cloudData.budgets);
+        setAccountTransfers(cloudData.accountTransfers);
+        if (cloudData.categories.length > 0) {
+          setCategories(cloudData.categories);
+        }
+        if (cloudData.messageHistory) {
+          setMessageHistory(cloudData.messageHistory);
+        }
+        if (cloudData.openingBalance > 0) {
+          setOpeningBalanceState(cloudData.openingBalance);
+        }
+
+        // Save to user-specific offline cache
+        await storage.setItem(
+          `my_wallet_offline_cache_${currentUserId}`,
+          JSON.stringify({
+            transactions: cloudData.transactions,
+            creditDebtRecords: cloudData.creditDebtRecords,
+            people: cloudData.people,
+            accounts: cloudData.accounts.length > 0 ? cloudData.accounts : INITIAL_ACCOUNTS,
+            budgets: cloudData.budgets,
+            accountTransfers: cloudData.accountTransfers,
+            categories: cloudData.categories,
+            messageHistory: cloudData.messageHistory,
+            openingBalance: cloudData.openingBalance,
+          })
+        );
+
+        // Drain offline sync queue specifically for this user
+        processSyncQueue(currentUserId).catch(() => {});
+
+        // Check & trigger automatic daily backup
+        checkAndTriggerAutoBackup(currentUserId, {
+          openingBalance: cloudData.openingBalance || openingBalance,
+          accounts: cloudData.accounts.length > 0 ? cloudData.accounts : INITIAL_ACCOUNTS,
+          accountTransfers: cloudData.accountTransfers,
+          categories: cloudData.categories.length > 0 ? cloudData.categories : categories,
+          budgets: cloudData.budgets,
+          people: cloudData.people,
+          creditDebtRecords: cloudData.creditDebtRecords,
+          transactions: cloudData.transactions,
+          recurringTransactions,
+          reminderPreferences,
+        }).catch(() => {});
+
+        setSyncState('synced');
+        setLastSyncedAt(new Date().toLocaleTimeString());
+        setHasUnmigratedLocalData(false);
       } catch (err) {
         console.warn('Sync on login failed:', err);
         setSyncState('error');
@@ -530,54 +679,98 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Persist State to Storage (Only after hydration)
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-  }, [transactions, isHydrated]);
+  }, [transactions, isHydrated, user?.id]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.CREDIT_DEBT, JSON.stringify(creditDebtRecords));
-  }, [creditDebtRecords, isHydrated]);
+  }, [creditDebtRecords, isHydrated, user?.id]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
-  }, [categories, isHydrated]);
+  }, [categories, isHydrated, user?.id]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(budgets));
-  }, [budgets, isHydrated]);
+  }, [budgets, isHydrated, user?.id]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
-  }, [accounts, isHydrated]);
+  }, [accounts, isHydrated, user?.id]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.TRANSFERS, JSON.stringify(accountTransfers));
-  }, [accountTransfers, isHydrated]);
+  }, [accountTransfers, isHydrated, user?.id]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.PEOPLE, JSON.stringify(people));
-  }, [people, isHydrated]);
+  }, [people, isHydrated, user?.id]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || user?.id) return;
     storage.setItem(STORAGE_KEYS.RECURRING, JSON.stringify(recurringTransactions));
-  }, [recurringTransactions, isHydrated]);
+  }, [recurringTransactions, isHydrated, user?.id]);
 
   useEffect(() => {
     if (!isHydrated) return;
     storage.setItem(STORAGE_KEYS.REMINDER_PREFS, JSON.stringify(reminderPreferences));
   }, [reminderPreferences, isHydrated]);
 
-  // Budget Summary
+  // Persist Authenticated User Offline Cache
+  useEffect(() => {
+    if (!isHydrated || !user?.id) return;
+    const cacheKey = `my_wallet_offline_cache_${user.id}`;
+    storage.setItem(
+      cacheKey,
+      JSON.stringify({
+        transactions,
+        creditDebtRecords,
+        people,
+        accounts,
+        budgets,
+        accountTransfers,
+        categories,
+        messageHistory,
+        openingBalance,
+      })
+    );
+  }, [
+    isHydrated,
+    user?.id,
+    transactions,
+    creditDebtRecords,
+    people,
+    accounts,
+    budgets,
+    accountTransfers,
+    categories,
+    messageHistory,
+    openingBalance,
+  ]);
+
+  // Selected Month for Budget View & Target
+  const [selectedBudgetMonth, setSelectedBudgetMonth] = useState<string>(() =>
+    new Date().toISOString().slice(0, 7)
+  );
+
+  // Budget Summary for Selected Month
   const budgetSummary = useMemo<BudgetSummary>(() => {
-    return calculateBudgetProgress(categories, transactions, budgets);
-  }, [categories, transactions, budgets]);
+    return calculateBudgetProgress(categories, transactions, budgets, selectedBudgetMonth);
+  }, [categories, transactions, budgets, selectedBudgetMonth]);
+
+  const getBudgetForMonth = useCallback(
+    (monthStr: string) => {
+      return calculateBudgetProgress(categories, transactions, budgets, monthStr);
+    },
+    [categories, transactions, budgets]
+  );
 
   // Financial Calculations via Financial Engine
   const incomeExpenseSummary = useMemo<IncomeExpenseSummary>(() => {
@@ -693,7 +886,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setTransactions((prev) => [newTx, ...prev]);
     if (user) {
-      syncTransactionItem(user.id, newTx, 'upsert');
+      enqueueSyncItem(user.id, 'transaction', newTx.id, 'upsert', newTx);
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
     return newTx;
@@ -701,24 +894,41 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
     setTransactions((prev) =>
-      prev.map((tx) => (tx.id === id ? { ...tx, ...updates, updatedAt: new Date().toISOString() } : tx))
+      prev.map((tx) => {
+        if (tx.id !== id) return tx;
+        const updated = { ...tx, ...updates, updatedAt: new Date().toISOString() };
+        if (user) {
+          enqueueSyncItem(user.id, 'transaction', id, 'upsert', updated);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        }
+        return updated;
+      })
     );
     setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, ...updates } as Transaction) : prev));
-  }, []);
+  }, [user]);
 
   const deleteTransaction = useCallback((id: string) => {
     setTransactions((prev) => prev.filter((tx) => tx.id !== id));
     if (user) {
-      syncTransactionItem(user.id, { id } as any, 'delete');
+      enqueueSyncItem(user.id, 'transaction', id, 'delete', { id });
+      setLastSyncedAt(new Date().toLocaleTimeString());
     }
   }, [user]);
 
   const updateTransactionAttachments = useCallback((id: string, newAttachments: Attachment[]) => {
     setTransactions((prev) =>
-      prev.map((tx) => (tx.id === id ? { ...tx, attachments: newAttachments, updatedAt: new Date().toISOString() } : tx))
+      prev.map((tx) => {
+        if (tx.id !== id) return tx;
+        const updated = { ...tx, attachments: newAttachments, updatedAt: new Date().toISOString() };
+        if (user) {
+          enqueueSyncItem(user.id, 'transaction', id, 'upsert', updated);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        }
+        return updated;
+      })
     );
     setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, attachments: newAttachments } as Transaction) : prev));
-  }, []);
+  }, [user]);
 
   // Credit & Debt Actions
   const addCreditDebt = useCallback((data: Omit<CreditDebtRecord, 'id' | 'remainingAmount' | 'createdAt' | 'updatedAt'>) => {
@@ -765,7 +975,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setCreditDebtRecords((prev) => [newRecord, ...prev]);
     if (user) {
-      syncKhataItem(user.id, newRecord, 'upsert');
+      enqueueSyncItem(user.id, 'khata', newRecord.id, 'upsert', newRecord);
       setLastSyncedAt(new Date().toLocaleTimeString());
     }
 
@@ -783,7 +993,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             createdAt: now.toISOString(),
           };
           if (user) {
-            syncPersonItem(user.id, newP, 'upsert');
+            enqueueSyncItem(user.id, 'person', newP.id, 'upsert', newP);
           }
           return [...prev, newP];
         }
@@ -807,11 +1017,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         else if (dueStatus.isOverdue) status = 'overdue';
         else if (settled > 0) status = 'partial';
         else status = 'pending';
-        return { ...updated, remainingAmount: remaining, status };
+        const finalRec = { ...updated, remainingAmount: remaining, status };
+        if (user) {
+          enqueueSyncItem(user.id, 'khata', id, 'upsert', finalRec);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        }
+        return finalRec;
       })
     );
     setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, ...updates } as CreditDebtRecord) : prev));
-  }, []);
+  }, [user]);
 
   const settleCreditDebt = useCallback((
     id: string,
@@ -853,8 +1068,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
 
         const existingRepayments = record.repayments || [];
-
-        return {
+        const finalRec: CreditDebtRecord = {
           ...record,
           settledAmount: newSettled,
           remainingAmount: remaining,
@@ -862,21 +1076,37 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           repayments: [newRepayment, ...existingRepayments],
           updatedAt: now.toISOString(),
         };
+
+        if (user) {
+          enqueueSyncItem(user.id, 'khata', id, 'upsert', finalRec);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        }
+
+        return finalRec;
       })
     );
-  }, []);
+  }, [user]);
 
   const updateCreditDebtAttachments = useCallback((id: string, newAttachments: Attachment[]) => {
     setCreditDebtRecords((prev) =>
-      prev.map((rec) => (rec.id === id ? { ...rec, attachments: newAttachments, updatedAt: new Date().toISOString() } : rec))
+      prev.map((rec) => {
+        if (rec.id !== id) return rec;
+        const updated = { ...rec, attachments: newAttachments, updatedAt: new Date().toISOString() };
+        if (user) {
+          enqueueSyncItem(user.id, 'khata', id, 'upsert', updated);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        }
+        return updated;
+      })
     );
     setSelectedRecord((prev) => (prev && prev.id === id ? ({ ...prev, attachments: newAttachments } as CreditDebtRecord) : prev));
-  }, []);
+  }, [user]);
 
   const deleteCreditDebt = useCallback((id: string) => {
     setCreditDebtRecords((prev) => prev.filter((rec) => rec.id !== id));
     if (user) {
-      syncKhataItem(user.id, { id } as any, 'delete');
+      enqueueSyncItem(user.id, 'khata', id, 'delete', { id });
+      setLastSyncedAt(new Date().toLocaleTimeString());
     }
   }, [user]);
 
@@ -890,19 +1120,31 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
     setAccounts((prev) => [...prev, newAcc]);
     if (user) {
-      syncAccountItem(user.id, newAcc, 'upsert');
+      enqueueSyncItem(user.id, 'account', newAcc.id, 'upsert', newAcc);
+      setLastSyncedAt(new Date().toLocaleTimeString());
     }
     return newAcc;
   }, [user]);
 
   const updateAccount = useCallback((id: string, updates: Partial<Account>) => {
-    setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
-  }, []);
+    setAccounts((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a;
+        const updated = { ...a, ...updates };
+        if (user) {
+          enqueueSyncItem(user.id, 'account', id, 'upsert', updated);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        }
+        return updated;
+      })
+    );
+  }, [user]);
 
   const deleteAccount = useCallback((id: string) => {
     setAccounts((prev) => prev.filter((a) => a.id !== id));
     if (user) {
-      syncAccountItem(user.id, { id } as any, 'delete');
+      enqueueSyncItem(user.id, 'account', id, 'delete', { id });
+      setLastSyncedAt(new Date().toLocaleTimeString());
     }
   }, [user]);
 
@@ -928,17 +1170,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setAccountTransfers((prev) => [newTransfer, ...prev]);
     if (user) {
-      syncTransferItem(user.id, newTransfer);
+      enqueueSyncItem(user.id, 'transfer', newTransfer.id, 'upsert', newTransfer);
+      setLastSyncedAt(new Date().toLocaleTimeString());
     }
     return newTransfer;
   }, [user]);
 
   // Person Actions
   const updatePerson = useCallback((id: string, updates: Partial<Person>) => {
-    setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
-    if (user) {
-      syncPersonItem(user.id, { id, ...updates } as any, 'upsert');
-    }
+    setPeople((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const updated = { ...p, ...updates };
+        if (user) {
+          enqueueSyncItem(user.id, 'person', id, 'upsert', updated);
+          setLastSyncedAt(new Date().toLocaleTimeString());
+        }
+        return updated;
+      })
+    );
   }, [user]);
 
   const addPerson = useCallback((data: Omit<Person, 'id' | 'createdAt'>) => {
@@ -959,7 +1209,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
     setPeople((prev) => [...prev, newPerson]);
     if (user) {
-      syncPersonItem(user.id, newPerson, 'upsert');
+      enqueueSyncItem(user.id, 'person', newPerson.id, 'upsert', newPerson);
+      setLastSyncedAt(new Date().toLocaleTimeString());
     }
     return newPerson;
   }, [people, user, updatePerson]);
@@ -967,9 +1218,63 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const deletePerson = useCallback((id: string) => {
     setPeople((prev) => prev.filter((p) => p.id !== id));
     if (user) {
-      syncPersonItem(user.id, { id } as any, 'delete');
+      enqueueSyncItem(user.id, 'person', id, 'delete', { id });
+      setLastSyncedAt(new Date().toLocaleTimeString());
     }
   }, [user]);
+
+  const archivePerson = useCallback((id: string) => {
+    updatePerson(id, { isArchived: true });
+  }, [updatePerson]);
+
+  const unarchivePerson = useCallback((id: string) => {
+    updatePerson(id, { isArchived: false });
+  }, [updatePerson]);
+
+  // Smart Messaging & Reminder Log Actions
+  const logMessage = useCallback(
+    async (data: Omit<MessageRecord, 'id' | 'createdAt'>): Promise<MessageRecord> => {
+      const newRecord: MessageRecord = {
+        ...data,
+        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        createdAt: new Date().toISOString(),
+      };
+
+      setMessageHistory((prev) => {
+        const updated = [newRecord, ...prev];
+        storage.setItem(STORAGE_KEYS.MESSAGE_HISTORY, JSON.stringify(updated));
+        return updated;
+      });
+
+      if (user) {
+        enqueueSyncItem(user.id, 'message', newRecord.id, 'upsert', newRecord);
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+
+      return newRecord;
+    },
+    [user]
+  );
+
+  const deleteMessageRecord = useCallback(
+    (id: string) => {
+      setMessageHistory((prev) => {
+        const updated = prev.filter((m) => m.id !== id);
+        storage.setItem(STORAGE_KEYS.MESSAGE_HISTORY, JSON.stringify(updated));
+        return updated;
+      });
+      if (user) {
+        enqueueSyncItem(user.id, 'message', id, 'delete', { id });
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+    },
+    [user]
+  );
+
+  const clearMessageHistory = useCallback(() => {
+    setMessageHistory([]);
+    storage.removeItem(STORAGE_KEYS.MESSAGE_HISTORY);
+  }, []);
 
   // Category Actions
   const addCategory = useCallback((data: Omit<Category, 'id'>) => {
@@ -1019,31 +1324,52 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCategories((prev) =>
       prev.map((c) => (c.id === categoryId ? { ...c, budget: amount } : c))
     );
-  }, []);
+
+    if (user?.id) {
+      const existing = budgets.find((b) => b.month === month);
+      const updated: Budget = existing
+        ? {
+            ...existing,
+            categoryBudgets: { ...existing.categoryBudgets, [categoryId]: amount },
+            updatedAt: new Date().toISOString(),
+          }
+        : {
+            id: `budget-${month}`,
+            month,
+            totalBudget: 0,
+            categoryBudgets: { [categoryId]: amount },
+            createdAt: new Date().toISOString(),
+          };
+      enqueueSyncItem(user.id, 'budget', updated.id, 'upsert', updated);
+      setLastSyncedAt(new Date().toLocaleTimeString());
+    }
+  }, [user, budgets]);
 
   const setOverallMonthlyBudget = useCallback((amount: number, monthStr?: string) => {
     const month = monthStr || new Date().toISOString().slice(0, 7);
     setBudgets((prev) => {
       const existing = prev.find((b) => b.month === month);
-      if (existing) {
-        return prev.map((b) =>
-          b.month === month
-            ? { ...b, totalBudget: amount, updatedAt: new Date().toISOString() }
-            : b
-        );
+      const updated: Budget = existing
+        ? { ...existing, totalBudget: amount, updatedAt: new Date().toISOString() }
+        : {
+            id: `budget-${month}`,
+            month,
+            totalBudget: amount,
+            categoryBudgets: {},
+            createdAt: new Date().toISOString(),
+          };
+
+      if (user?.id) {
+        enqueueSyncItem(user.id, 'budget', updated.id, 'upsert', updated);
+        setLastSyncedAt(new Date().toLocaleTimeString());
       }
-      return [
-        ...prev,
-        {
-          id: `budget-${month}`,
-          month,
-          totalBudget: amount,
-          categoryBudgets: {},
-          createdAt: new Date().toISOString(),
-        },
-      ];
+
+      if (existing) {
+        return prev.map((b) => (b.month === month ? updated : b));
+      }
+      return [...prev, updated];
     });
-  }, []);
+  }, [user]);
 
   const deleteBudget = useCallback((categoryId: string, monthStr?: string) => {
     const month = monthStr || new Date().toISOString().slice(0, 7);
@@ -1185,11 +1511,34 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [addTransaction, addCreditDebt, openReminderModal]);
 
-  // Reset / Clear Data
+  // Reset / Clear Data (Deletes local and cloud data for authenticated user)
   const resetToDefaults = useCallback(async () => {
     try {
       await storage.multiRemove(Object.values(STORAGE_KEYS));
     } catch (_) {}
+
+    if (user?.id) {
+      const client = getSupabaseClient() as any;
+      if (client) {
+        try {
+          await Promise.allSettled([
+            client.from('transactions').delete().eq('user_id', user.id),
+            client.from('khata_transactions').delete().eq('user_id', user.id),
+            client.from('khata_people').delete().eq('user_id', user.id),
+            client.from('account_transfers').delete().eq('user_id', user.id),
+            client.from('budgets').delete().eq('user_id', user.id),
+            client.from('message_history').delete().eq('user_id', user.id),
+            client.from('attachments').delete().eq('user_id', user.id),
+          ]);
+        } catch (e) {
+          console.warn('Error clearing cloud tables for user:', e);
+        }
+      }
+      try {
+        await storage.removeItem(`my_wallet_offline_cache_${user.id}`);
+        await clearSyncQueue();
+      } catch (_) {}
+    }
 
     setTransactions([]);
     setCreditDebtRecords([]);
@@ -1199,9 +1548,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setAccountTransfers([]);
     setPeople([]);
     setRecurringTransactions([]);
+    setMessageHistory([]);
     setOpeningBalance(0);
     setCurrentMode('income_expense');
-  }, [setOpeningBalance, setCurrentMode]);
+  }, [user, setOpeningBalance, setCurrentMode]);
 
   // Cloud Manual Sync
   const triggerManualSync = useCallback(async () => {
@@ -1388,18 +1738,123 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [user, triggerManualSync]
   );
 
+  // Manual Backup Now Action
+  const triggerBackupNow = useCallback(async () => {
+    const payload: CloudPayload = {
+      openingBalance,
+      accounts,
+      accountTransfers,
+      categories,
+      budgets,
+      people,
+      creditDebtRecords,
+      transactions,
+      recurringTransactions,
+      reminderPreferences,
+    };
+    const res = await createWalletBackup(user?.id || 'local-vault', payload, 'manual');
+    if (res.success && res.backup) {
+      setBackupHistoryState((prev) => [res.backup!, ...prev.filter((b) => b.id !== res.backup!.id)]);
+      setLastBackupTime(res.backup.createdAt);
+    }
+    return res;
+  }, [
+    user,
+    openingBalance,
+    accounts,
+    accountTransfers,
+    categories,
+    budgets,
+    people,
+    creditDebtRecords,
+    transactions,
+    recurringTransactions,
+    reminderPreferences,
+  ]);
+
+  // Restore from a structured backup entry
+  const restoreFromBackupEntry = useCallback(
+    async (entry: WalletBackupEntry) => {
+      try {
+        const data = entry.data;
+        if (!data) return { success: false, restoredCount: 0, error: 'Backup data is empty.' };
+
+        let count = 0;
+        if (Array.isArray(data.transactions) && data.transactions.length > 0) {
+          setTransactions((prev) => {
+            const map = new Map<string, Transaction>();
+            prev.forEach((t) => map.set(t.id, t));
+            data.transactions.forEach((t) => {
+              if (!map.has(t.id)) count++;
+              map.set(t.id, t);
+            });
+            return Array.from(map.values());
+          });
+        }
+
+        if (Array.isArray(data.creditDebtRecords) && data.creditDebtRecords.length > 0) {
+          setCreditDebtRecords((prev) => {
+            const map = new Map<string, CreditDebtRecord>();
+            prev.forEach((k) => map.set(k.id, k));
+            data.creditDebtRecords.forEach((k) => {
+              if (!map.has(k.id)) count++;
+              map.set(k.id, k);
+            });
+            return Array.from(map.values());
+          });
+        }
+
+        if (Array.isArray(data.people) && data.people.length > 0) {
+          setPeople((prev) => {
+            const map = new Map<string, Person>();
+            prev.forEach((p) => map.set(p.id, p));
+            data.people.forEach((p) => map.set(p.id, p));
+            return Array.from(map.values());
+          });
+        }
+
+        if (Array.isArray(data.accounts) && data.accounts.length > 0) {
+          setAccounts(data.accounts);
+        }
+
+        if (Array.isArray(data.budgets) && data.budgets.length > 0) {
+          setBudgets(data.budgets);
+        }
+
+        if (typeof data.openingBalance === 'number') {
+          setOpeningBalanceState(data.openingBalance);
+        }
+
+        if (user) {
+          triggerManualSync().catch(console.warn);
+        }
+
+        return { success: true, restoredCount: count };
+      } catch (err: any) {
+        return { success: false, restoredCount: 0, error: err.message || 'Restore failed' };
+      }
+    },
+    [user, triggerManualSync]
+  );
+
   return (
     <WalletContext.Provider
       value={{
         isHydrated,
         syncState,
         lastSyncedAt,
+        pendingSyncCount,
         hasUnmigratedLocalData,
         triggerManualSync,
         migrateLocalDataToCloud,
         exportAllDataJson,
         exportTransactionsCsv,
         restoreFromJsonBackup,
+        triggerBackupNow,
+        backupHistory,
+        lastBackupTime,
+        refreshBackupHistory,
+        restoreFromBackupEntry,
         currentMode,
         setCurrentMode,
         activeTab,
@@ -1415,6 +1870,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         openingBalance,
         incomeExpenseSummary,
         budgetSummary,
+        selectedBudgetMonth,
+        setSelectedBudgetMonth,
+        getBudgetForMonth,
         khataSummary,
         personSummaries,
         combinedFinancialSummary,
@@ -1462,6 +1920,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addPerson,
         updatePerson,
         deletePerson,
+        archivePerson,
+        unarchivePerson,
+        messageHistory,
+        logMessage,
+        deleteMessageRecord,
+        clearMessageHistory,
         addCategory,
         updateCategory,
         deleteCategory,

@@ -19,6 +19,8 @@ import {
   ArrowDownRight,
   AlertTriangle,
   Sparkles,
+  CheckCircle2,
+  ArrowRight,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -243,99 +245,134 @@ export const KhataBookView: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Khata Dashboard: 6 Specific KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* 2. Khata Dashboard: 4 Executive Summary Cards (Clean 2-col on Mobile, 4-col on Tablet/Desktop) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-start auto-rows-min">
         {/* 1. Total Receivable */}
-        <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-900/60 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold text-sky-600 dark:text-sky-400">Total Receivable</span>
-            <HandCoins className="w-4 h-4 text-sky-500" />
-          </div>
-          <div>
-            <span className="text-xl font-black text-sky-600 dark:text-sky-400 block">
-              {formatRupees(khataSummary.totalReceivable)}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-900/60 shadow-sm flex flex-col self-start h-auto">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-sky-600 dark:text-sky-400 uppercase tracking-wider text-[11px] truncate">
+              Total Receivable
             </span>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Money to Collect</span>
+            <div className="w-7 h-7 rounded-lg bg-sky-50 dark:bg-sky-950/50 flex items-center justify-center shrink-0">
+              <HandCoins className="w-4 h-4 text-sky-500" />
+            </div>
           </div>
+          <span className="text-xl sm:text-2xl font-black text-sky-600 dark:text-sky-400 block truncate">
+            {formatRupees(khataSummary.totalReceivable)}
+          </span>
+          <span className="text-[11px] text-slate-400 mt-1 block truncate">
+            Money others owe me
+          </span>
         </div>
 
         {/* 2. Total Payable */}
-        <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold text-amber-600 dark:text-amber-400">Total Payable</span>
-            <Landmark className="w-4 h-4 text-amber-500" />
-          </div>
-          <div>
-            <span className="text-xl font-black text-amber-600 dark:text-amber-400 block">
-              {formatRupees(khataSummary.totalPayable)}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 shadow-sm flex flex-col self-start h-auto">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider text-[11px] truncate">
+              Total Payable
             </span>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Money to Repay</span>
+            <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-950/50 flex items-center justify-center shrink-0">
+              <Landmark className="w-4 h-4 text-amber-500" />
+            </div>
           </div>
+          <span className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 block truncate">
+            {formatRupees(khataSummary.totalPayable)}
+          </span>
+          <span className="text-[11px] text-slate-400 mt-1 block truncate">
+            Money I owe others
+          </span>
         </div>
 
-        {/* 3. Net Outstanding */}
-        <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold text-indigo-600 dark:text-indigo-400">Net Outstanding</span>
-            <Sparkles className="w-4 h-4 text-indigo-500" />
+        {/* 3. Total Outstanding */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60 shadow-sm flex flex-col self-start h-auto">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider text-[11px] truncate">
+              Total Outstanding
+            </span>
+            <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 text-indigo-500" />
+            </div>
           </div>
-          <div>
+          <span className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 block truncate">
+            {formatRupees(khataSummary.totalReceivable + khataSummary.totalPayable)}
+          </span>
+          <span className="text-[11px] text-slate-400 mt-1 block truncate">
+            Combined pending volume
+          </span>
+        </div>
+
+        {/* 4. Overdue Payments (Compact, content-based height with zero row stretching) */}
+        <div
+          className={cn(
+            'p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 shadow-sm flex flex-col self-start h-auto transition-all',
+            khataSummary.overdueCount > 0
+              ? 'border border-rose-200 dark:border-rose-900/60 bg-rose-50/20'
+              : 'border border-slate-200/80 dark:border-slate-800'
+          )}
+        >
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
             <span
               className={cn(
-                'text-xl font-black block',
-                khataSummary.netKhataBalance >= 0
-                  ? 'text-indigo-600 dark:text-indigo-400'
-                  : 'text-amber-600 dark:text-amber-400'
+                'font-semibold uppercase tracking-wider text-[11px] truncate',
+                khataSummary.overdueCount > 0
+                  ? 'text-rose-600 dark:text-rose-400'
+                  : 'text-slate-600 dark:text-slate-400'
               )}
             >
-              {formatRupees(khataSummary.netKhataBalance, { showSign: true })}
+              Overdue Payments
             </span>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Rec - Pay</span>
+            <div
+              className={cn(
+                'w-7 h-7 rounded-lg flex items-center justify-center shrink-0',
+                khataSummary.overdueCount > 0
+                  ? 'bg-rose-50 dark:bg-rose-950/50'
+                  : 'bg-slate-100 dark:bg-slate-800'
+              )}
+            >
+              <AlertTriangle
+                className={cn(
+                  'w-4 h-4',
+                  khataSummary.overdueCount > 0 ? 'text-rose-500' : 'text-slate-400'
+                )}
+              />
+            </div>
           </div>
-        </div>
 
-        {/* 4. People Who Owe Money */}
-        <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Owe You</span>
-            <Users className="w-4 h-4 text-sky-500" />
-          </div>
-          <div>
-            <span className="text-xl font-black text-slate-900 dark:text-white block">
-              {khataSummary.peopleOweMeCount} people
-            </span>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Active Debtors</span>
-          </div>
-        </div>
-
-        {/* 5. People I Owe Money To */}
-        <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">You Owe</span>
-            <Users className="w-4 h-4 text-amber-500" />
-          </div>
-          <div>
-            <span className="text-xl font-black text-slate-900 dark:text-white block">
-              {khataSummary.peopleIOweCount} people
-            </span>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Active Creditors</span>
-          </div>
-        </div>
-
-        {/* 6. Overdue Payments */}
-        <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span className="font-semibold text-rose-600 dark:text-rose-400">Overdue</span>
-            <AlertTriangle className="w-4 h-4 text-rose-500" />
-          </div>
-          <div>
-            <span className="text-xl font-black text-rose-600 dark:text-rose-400 block">
-              {khataSummary.overdueCount} entries
-            </span>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">
-              {formatRupees(khataSummary.overdueReceivable)} pending
-            </span>
-          </div>
+          {khataSummary.overdueCount === 0 ? (
+            <>
+              <div className="flex items-center gap-1.5 py-0.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">
+                  No overdue payments
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400 mt-1 block truncate">
+                All collections on track
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 block truncate">
+                {khataSummary.overdueCount} Overdue
+              </span>
+              <div className="flex items-center justify-between mt-1 text-[11px]">
+                <span className="text-rose-600 dark:text-rose-400 font-semibold truncate">
+                  {formatRupees(khataSummary.overdueReceivable)} past due
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSubTab('transactions');
+                    setStatusFilter('overdue');
+                  }}
+                  className="font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 flex items-center gap-0.5 hover:underline transition-colors shrink-0 ml-1"
+                >
+                  <span>View Details</span>
+                  <ArrowRight className="w-3 h-3 shrink-0" />
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
