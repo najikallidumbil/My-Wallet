@@ -23,7 +23,6 @@ import {
   User,
   Phone,
   Sparkles,
-  Contact,
   UserPlus,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -33,13 +32,6 @@ import { colors } from '../../theme/colors';
 import { Attachment, Person } from '../../types';
 import { useResponsive } from '../../lib/useResponsive';
 import { AddPersonModal } from './AddPersonModal';
-import { PhoneSelectorModal } from './PhoneSelectorModal';
-import {
-  pickContactFromDevice,
-  findDuplicatePerson,
-  openDeviceSettings,
-  ContactPhoneNumber,
-} from '../../lib/contactPicker';
 
 interface QuickAddModalProps {
   visible: boolean;
@@ -78,9 +70,6 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [notes, setNotes] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isAddPersonModalOpen, setIsAddPersonModalOpen] = useState(false);
-  const [phoneModalVisible, setPhoneModalVisible] = useState(false);
-  const [pendingPhones, setPendingPhones] = useState<ContactPhoneNumber[]>([]);
-  const [pendingContactName, setPendingContactName] = useState('');
 
   const todayStr = new Date().toISOString().split('T')[0];
   const now = new Date();
@@ -144,65 +133,6 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       }
     } else {
       setSelectedPersonId(null);
-    }
-  };
-
-  const handleImportDeviceContact = async () => {
-    try {
-      const result = await pickContactFromDevice();
-      if (result.success && result.contact) {
-        const { name: importedName, phone: importedPhone, phones, hasNoPhone } = result.contact;
-        setPersonName(importedName);
-
-        if (phones && phones.length > 1) {
-          setPendingContactName(importedName);
-          setPendingPhones(phones);
-          setPhoneModalVisible(true);
-        } else if (hasNoPhone || !importedPhone) {
-          setPersonPhone('');
-          Alert.alert(
-            'No Phone Number Found',
-            'No phone number found for this contact. Please enter manually.'
-          );
-        } else {
-          setPersonPhone(importedPhone);
-        }
-
-        const duplicate = findDuplicatePerson(
-          importedName,
-          importedPhone,
-          people
-        );
-        if (duplicate) {
-          setSelectedPersonId(duplicate.id);
-          Alert.alert('Contact Linked', `Linked to existing Khata contact "${duplicate.name}".`);
-        } else {
-          setSelectedPersonId(null);
-        }
-      } else if (result.permissionDenied) {
-        if (result.canOpenSettings) {
-          Alert.alert(
-            'Contacts Permission Required',
-            'MY WALLET needs permission to access your device contacts so you can quickly add people to your Khata Book.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => openDeviceSettings() },
-            ]
-          );
-        } else {
-          Alert.alert(
-            'Permission Denied',
-            'Contacts permission was denied. You can enter the name and phone number manually, or enable permission in Settings.'
-          );
-        }
-      } else if (!result.cancelled && result.error) {
-        Alert.alert('Contacts Notice', result.error);
-      }
-    } catch (err) {
-      Alert.alert(
-        'Contacts',
-        'Could not access phone contacts. Please enter name and phone manually.'
-      );
     }
   };
 
@@ -521,24 +451,15 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                       : 'PERSON NAME (WHO LENT YOU MONEY?) *'}
                   </Text>
 
-                  {/* Contact Action Buttons */}
+                  {/* Unified Add Person Trigger */}
                   <View style={styles.personActionRow}>
                     <TouchableOpacity
                       style={styles.personActionBtn}
-                      onPress={handleImportDeviceContact}
-                      activeOpacity={0.7}
-                    >
-                      <Contact size={14} color={colors.brand[700]} />
-                      <Text style={styles.personActionBtnText}>Select from Contacts</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.personActionBtn, styles.personActionBtnSecondary]}
                       onPress={() => setIsAddPersonModalOpen(true)}
                       activeOpacity={0.7}
                     >
-                      <UserPlus size={14} color={colors.slate[700]} />
-                      <Text style={styles.personActionBtnTextDark}>+ Add New Person</Text>
+                      <UserPlus size={14} color={colors.brand[700]} />
+                      <Text style={styles.personActionBtnText}>+ Add Person</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -888,16 +809,6 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         onPersonAdded={(p) => {
           handleSelectPerson(p);
         }}
-      />
-
-      <PhoneSelectorModal
-        visible={phoneModalVisible}
-        contactName={pendingContactName || personName}
-        phones={pendingPhones}
-        onSelectPhone={(selectedNum) => {
-          setPersonPhone(selectedNum);
-        }}
-        onClose={() => setPhoneModalVisible(false)}
       />
     </Modal>
   );

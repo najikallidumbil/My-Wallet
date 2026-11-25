@@ -84,12 +84,12 @@ assert(!addPersonModalContent.includes('Supported on mobile devices (Android Chr
 assert(!addPersonModalContent.includes('Device contact picker is supported on mobile browsers'), 'Legacy browser warning still present in AddPersonModal');
 console.log('✓ AddPersonModal has removed legacy browser notice and provides clean native picker action');
 
-// 5. Verify PhoneSelectorModal exists and is referenced
+// 5. Verify PhoneSelectorModal exists and is referenced in AddPersonModal
 const phoneSelectorContent = fs.readFileSync(path.resolve(__dirname, '../src/components/rn/PhoneSelectorModal.tsx'), 'utf8');
 assert(phoneSelectorContent.includes('PhoneSelectorModal'), 'PhoneSelectorModal definition verified');
 assert(addPersonModalContent.includes('PhoneSelectorModal'), 'PhoneSelectorModal referenced in AddPersonModal');
 const quickAddModalContent = fs.readFileSync(path.resolve(__dirname, '../src/components/rn/QuickAddModal.tsx'), 'utf8');
-assert(quickAddModalContent.includes('PhoneSelectorModal'), 'PhoneSelectorModal referenced in QuickAddModal');
-console.log('✓ PhoneSelectorModal is implemented and integrated in AddPersonModal & QuickAddModal');
+assert(quickAddModalContent.includes('AddPersonModal'), 'AddPersonModal referenced in QuickAddModal');
+console.log('✓ PhoneSelectorModal and AddPersonModal are implemented and cleanly integrated');
 
 console.log('\n--- ALL CONTACT PICKER UNIT TESTS PASSED ---');

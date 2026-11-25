@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,9 +18,10 @@ import {
   Check,
   Contact,
   AlertCircle,
-  Smartphone,
   Phone,
   User,
+  ArrowLeft,
+  ChevronRight,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
@@ -39,6 +40,9 @@ interface AddPersonModalProps {
   onPersonAdded?: (person: Person) => void;
 }
 
+type AddPersonStep = 'choose' | 'form';
+type AddPersonSource = 'contacts' | 'manual';
+
 export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   visible,
   onClose,
@@ -46,6 +50,8 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 }) => {
   const { people, addPerson } = useWallet();
 
+  const [step, setStep] = useState<AddPersonStep>('choose');
+  const [source, setSource] = useState<AddPersonSource>('manual');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [isImporting, setIsImporting] = useState(false);
@@ -57,15 +63,36 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [pendingPhones, setPendingPhones] = useState<ContactPhoneNumber[]>([]);
   const [pendingContactName, setPendingContactName] = useState('');
 
+  // Reset to initial choose screen whenever modal becomes visible
+  useEffect(() => {
+    if (visible) {
+      setStep('choose');
+      setSource('manual');
+      setName('');
+      setPhone('');
+      setImportNotice(null);
+      setIsImporting(false);
+      setIsSaving(false);
+      setPhoneModalVisible(false);
+    }
+  }, [visible]);
+
   const handleClose = () => {
     setName('');
     setPhone('');
     setImportNotice(null);
     setPhoneModalVisible(false);
+    setStep('choose');
     onClose();
   };
 
-  const handleImportFromContacts = async () => {
+  const handleBackToOptions = () => {
+    setStep('choose');
+    setImportNotice(null);
+  };
+
+  // Option 1: Pick contact from device
+  const handleSelectFromContacts = async () => {
     setImportNotice(null);
     setIsImporting(true);
 
@@ -75,6 +102,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       if (result.success && result.contact) {
         const { name: importedName, phone: importedPhone, phones, hasNoPhone } = result.contact;
         setName(importedName);
+        setSource('contacts');
 
         if (phones && phones.length > 1) {
           // Multiple numbers: ask user to select preferred number
@@ -83,17 +111,13 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           setPhoneModalVisible(true);
         } else if (hasNoPhone || !importedPhone) {
           setPhone('');
-          setImportNotice('Contact name imported. Please enter phone number manually.');
-          Alert.alert(
-            'No Phone Number Found',
-            'No phone number found for this contact. Please enter manually.'
-          );
+          setImportNotice('Contact name imported. Please enter mobile number.');
         } else {
           setPhone(importedPhone);
           setImportNotice('Contact imported. You can edit details before saving.');
         }
 
-        // Check for duplicates to inform the user
+        // Check for duplicates
         const duplicate = findDuplicatePerson(importedName, importedPhone, people);
         if (duplicate) {
           Alert.alert(
@@ -101,6 +125,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
             `"${duplicate.name}" (${duplicate.phone || 'No phone'}) is already in your Khata Book. Saving will use and update their existing profile.`
           );
         }
+
+        // Advance to form screen for review/editing
+        setStep('form');
       } else if (result.permissionDenied) {
         if (result.canOpenSettings) {
           Alert.alert(
@@ -122,7 +149,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       }
     } catch (err) {
       Alert.alert(
-        'Contacts',
+        'Contacts Notice',
         'Could not access phone contacts. Please enter name and phone number manually.'
       );
     } finally {
@@ -130,10 +157,20 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
     }
   };
 
+  // Option 2: Add Person manually
+  const handleSelectManual = () => {
+    setName('');
+    setPhone('');
+    setImportNotice(null);
+    setSource('manual');
+    setStep('form');
+  };
+
+  // Save Person to Supabase
   const handleSave = async () => {
     const cleanName = name.trim();
     if (!cleanName) {
-      Alert.alert('Required Field', 'Please enter a name for the person or customer.');
+      Alert.alert('Required Field', 'Please enter a full name for the person.');
       return;
     }
 
@@ -179,12 +216,12 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
 
       onPersonAdded?.(saved);
       handleClose();
-      Alert.alert('Person Added', `"${cleanName}" saved to Supabase and Khata Book.`);
+      Alert.alert('Person Added', `"${cleanName}" added successfully.`);
     } catch (err: any) {
       console.error('[AddPerson Error]', err);
       Alert.alert(
         'Database Save Failed',
-        err.message || 'Could not save person to database. Please check your Supabase connection and try again.'
+        err.message || 'Could not save person to database. Please check your connection and try again.'
       );
     } finally {
       setIsSaving(false);
@@ -199,132 +236,177 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           style={styles.backdrop}
         >
           <View style={styles.modalCard}>
-            {/* Header */}
-            <View style={styles.header}>
-              <View style={styles.titleRow}>
-                <View style={styles.titleIconBox}>
-                  <UserPlus size={18} color={colors.brand[600]} />
+            {/* STEP 1: INITIAL TWO-OPTION INTERFACE */}
+            {step === 'choose' ? (
+              <View>
+                {/* Header */}
+                <View style={styles.header}>
+                  <View style={styles.titleRow}>
+                    <View style={styles.titleIconBox}>
+                      <UserPlus size={18} color={colors.brand[600]} />
+                    </View>
+                    <View>
+                      <Text style={styles.title}>Add Person</Text>
+                      <Text style={styles.subtitle}>Choose an option to continue</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={handleClose} style={styles.closeBtn} activeOpacity={0.7}>
+                    <X size={20} color={colors.slate[600]} />
+                  </TouchableOpacity>
                 </View>
-                <View>
-                  <Text style={styles.title}>Add Person / Customer</Text>
-                  <Text style={styles.subtitle}>Khata Book Contact</Text>
+
+                {/* ONLY TWO CLEAR OPTIONS */}
+                <View style={styles.optionsContainer}>
+                  {/* Option 1: From Contacts */}
+                  <TouchableOpacity
+                    style={styles.optionCard}
+                    onPress={handleSelectFromContacts}
+                    disabled={isImporting}
+                    activeOpacity={0.75}
+                  >
+                    <View style={[styles.optionIconBox, styles.contactsIconBox]}>
+                      {isImporting ? (
+                        <ActivityIndicator size="small" color={colors.brand[600]} />
+                      ) : (
+                        <Contact size={22} color={colors.brand[600]} />
+                      )}
+                    </View>
+                    <View style={styles.optionContent}>
+                      <Text style={styles.optionTitle}>From Contacts</Text>
+                      <Text style={styles.optionDescription}>
+                        Select a contact from your phone address book
+                      </Text>
+                    </View>
+                    <ChevronRight size={18} color={colors.slate[400]} />
+                  </TouchableOpacity>
+
+                  {/* Option 2: Add Person (Manual) */}
+                  <TouchableOpacity
+                    style={styles.optionCard}
+                    onPress={handleSelectManual}
+                    activeOpacity={0.75}
+                  >
+                    <View style={[styles.optionIconBox, styles.manualIconBox]}>
+                      <UserPlus size={22} color={colors.income.text} />
+                    </View>
+                    <View style={styles.optionContent}>
+                      <Text style={styles.optionTitle}>Add Person</Text>
+                      <Text style={styles.optionDescription}>
+                        Enter full name and mobile number manually
+                      </Text>
+                    </View>
+                    <ChevronRight size={18} color={colors.slate[400]} />
+                  </TouchableOpacity>
                 </View>
               </View>
-              <TouchableOpacity onPress={handleClose} style={styles.closeBtn} activeOpacity={0.7}>
-                <X size={20} color={colors.slate[600]} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Import from Device Contacts Action Button */}
-              <TouchableOpacity
-                style={styles.importBtn}
-                onPress={handleImportFromContacts}
-                disabled={isImporting}
-                activeOpacity={0.8}
-              >
-                <View style={styles.importBtnLeft}>
-                  <View style={styles.importIconBox}>
-                    {isImporting ? (
-                      <ActivityIndicator size="small" color={colors.brand[700]} />
-                    ) : (
-                      <Contact size={18} color={colors.brand[700]} />
-                    )}
+            ) : (
+              /* STEP 2: ENTRY / EDITING FORM */
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {/* Header with Back Button */}
+                <View style={styles.header}>
+                  <View style={styles.titleRow}>
+                    <TouchableOpacity
+                      onPress={handleBackToOptions}
+                      style={styles.backBtn}
+                      activeOpacity={0.7}
+                    >
+                      <ArrowLeft size={18} color={colors.slate[700]} />
+                    </TouchableOpacity>
+                    <View>
+                      <Text style={styles.title}>
+                        {source === 'contacts' ? 'Contact Details' : 'Add Person'}
+                      </Text>
+                      <Text style={styles.subtitle}>
+                        {source === 'contacts'
+                          ? 'Review & edit before saving'
+                          : 'Enter person details'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.importBtnTextContainer}>
-                    <Text style={styles.importBtnTitle}>Import from Device Contacts</Text>
-                    <Text style={styles.importBtnSub}>
-                      Pick directly from your phone address book
-                    </Text>
+                  <TouchableOpacity onPress={handleClose} style={styles.closeBtn} activeOpacity={0.7}>
+                    <X size={20} color={colors.slate[600]} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Import Notice Pill */}
+                {importNotice && (
+                  <View style={styles.noticePill}>
+                    <AlertCircle size={14} color={colors.income.text} />
+                    <Text style={styles.noticeText}>{importNotice}</Text>
                   </View>
-                </View>
-                <View style={styles.importBadge}>
-                  <Smartphone size={12} color={colors.brand[600]} />
-                  <Text style={styles.importBadgeText}>Contacts</Text>
-                </View>
-              </TouchableOpacity>
+                )}
 
-              {/* Import Notice Pill */}
-              {importNotice && (
-                <View style={styles.noticePill}>
-                  <AlertCircle size={14} color={colors.income.text} />
-                  <Text style={styles.noticeText}>{importNotice}</Text>
-                </View>
-              )}
-
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>OR ENTER MANUALLY</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              {/* Name Field */}
-              <View style={styles.inputGroup}>
-                <View style={styles.inputLabelRow}>
+                {/* Field 1: Full Name (Required) */}
+                <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
                     <User size={12} color={colors.slate[500]} /> FULL NAME *
                   </Text>
-                  <TouchableOpacity
-                    style={styles.quickImportPill}
-                    onPress={handleImportFromContacts}
-                    activeOpacity={0.7}
-                  >
-                    <Contact size={11} color={colors.brand[600]} />
-                    <Text style={styles.quickImportText}>Pick</Text>
-                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="e.g. Rajesh Kumar"
+                    placeholderTextColor={colors.slate[400]}
+                    value={name}
+                    onChangeText={setName}
+                    autoCapitalize="words"
+                    autoFocus={source === 'manual'}
+                  />
                 </View>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="e.g. Rahul Sharma, Rahman, Vendor..."
-                  placeholderTextColor={colors.slate[400]}
-                  value={name}
-                  onChangeText={setName}
-                />
-              </View>
 
-              {/* Phone Field */}
-              <View style={styles.inputGroup}>
-                <View style={styles.inputLabelRow}>
-                  <Text style={styles.inputLabel}>
-                    <Phone size={12} color={colors.slate[500]} /> MOBILE PHONE NUMBER (OPTIONAL)
-                  </Text>
-                  {pendingPhones.length > 1 && (
-                    <TouchableOpacity
-                      style={styles.quickImportPill}
-                      onPress={() => setPhoneModalVisible(true)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.quickImportText}>Choose from {pendingPhones.length} nos</Text>
-                    </TouchableOpacity>
+                {/* Field 2: Mobile Number (Optional) */}
+                <View style={styles.inputGroup}>
+                  <View style={styles.inputLabelRow}>
+                    <Text style={styles.inputLabel}>
+                      <Phone size={12} color={colors.slate[500]} /> MOBILE PHONE NUMBER (OPTIONAL)
+                    </Text>
+                    {pendingPhones.length > 1 && (
+                      <TouchableOpacity
+                        style={styles.phoneChangePill}
+                        onPress={() => setPhoneModalVisible(true)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.phoneChangeText}>
+                          Select number ({pendingPhones.length})
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="e.g. +91 98765 43210 (Used for Reminders)"
+                    placeholderTextColor={colors.slate[400]}
+                    keyboardType="phone-pad"
+                    value={phone}
+                    onChangeText={setPhone}
+                  />
+                </View>
+
+                {/* Save Action Button */}
+                <TouchableOpacity
+                  style={[styles.submitBtn, isSaving && { opacity: 0.7 }]}
+                  onPress={handleSave}
+                  disabled={isSaving}
+                  activeOpacity={0.8}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator size="small" color={colors.white} />
+                  ) : (
+                    <>
+                      <Check size={18} color={colors.white} />
+                      <Text style={styles.submitBtnText}>Save Person</Text>
+                    </>
                   )}
-                </View>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="e.g. +91 98765 43210 (Used for WhatsApp & SMS)"
-                  placeholderTextColor={colors.slate[400]}
-                  keyboardType="phone-pad"
-                  value={phone}
-                  onChangeText={setPhone}
-                />
-              </View>
+                </TouchableOpacity>
 
-              {/* Save Action */}
-              <TouchableOpacity
-                style={[styles.submitBtn, isSaving && { opacity: 0.7 }]}
-                onPress={handleSave}
-                disabled={isSaving}
-                activeOpacity={0.8}
-              >
-                {isSaving ? (
-                  <ActivityIndicator size="small" color={colors.white} />
-                ) : (
-                  <>
-                    <Check size={18} color={colors.white} />
-                    <Text style={styles.submitBtnText}>Save Person</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </ScrollView>
+                {/* Secondary Back Link */}
+                <TouchableOpacity
+                  style={styles.secondaryBackBtn}
+                  onPress={handleBackToOptions}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.secondaryBackText}>Back to options</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -368,12 +450,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
   },
   titleIconBox: {
     width: 38,
     height: 38,
     borderRadius: 12,
     backgroundColor: colors.brand[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: colors.slate[100],
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -393,57 +484,51 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.slate[100],
   },
-  importBtn: {
+  optionsContainer: {
+    gap: 12,
+    marginVertical: 8,
+  },
+  optionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: colors.slate[200],
+    backgroundColor: colors.slate[50],
+  },
+  optionIconBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  contactsIconBox: {
     backgroundColor: colors.brand[50],
     borderWidth: 1,
     borderColor: colors.brand[200],
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 14,
   },
-  importBtnLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  manualIconBox: {
+    backgroundColor: colors.income.bg,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  optionContent: {
     flex: 1,
   },
-  importBtnTextContainer: {
-    flex: 1,
-  },
-  importIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.brand[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  importBtnTitle: {
-    fontSize: 13,
+  optionTitle: {
+    fontSize: 15,
     fontWeight: '800',
-    color: colors.brand[900],
+    color: colors.slate[900],
+    marginBottom: 2,
   },
-  importBtnSub: {
-    fontSize: 11,
-    color: colors.brand[700],
-    marginTop: 1,
-  },
-  importBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.white,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    gap: 4,
-  },
-  importBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: colors.brand[700],
+  optionDescription: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.slate[500],
+    lineHeight: 16,
   },
   noticePill: {
     flexDirection: 'row',
@@ -453,7 +538,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 12,
     gap: 6,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   noticeText: {
     fontSize: 11,
@@ -461,25 +546,8 @@ const styles = StyleSheet.create({
     color: colors.income.text,
     flex: 1,
   },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 14,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.slate[200],
-  },
-  dividerText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: colors.slate[400],
-    letterSpacing: 0.5,
-  },
   inputGroup: {
-    marginBottom: 14,
+    marginBottom: 16,
   },
   inputLabelRow: {
     flexDirection: 'row',
@@ -492,11 +560,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.slate[600],
     letterSpacing: 0.5,
+    marginBottom: 6,
   },
-  quickImportPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+  phoneChangePill: {
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 8,
@@ -504,7 +570,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.brand[200],
   },
-  quickImportText: {
+  phoneChangeText: {
     fontSize: 10,
     fontWeight: '700',
     color: colors.brand[700],
@@ -515,8 +581,8 @@ const styles = StyleSheet.create({
     borderColor: colors.slate[200],
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontSize: 13,
+    paddingVertical: 12,
+    fontSize: 14,
     color: colors.slate[900],
   },
   submitBtn: {
@@ -538,5 +604,16 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: '800',
+  },
+  secondaryBackBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  secondaryBackText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.slate[500],
   },
 });
