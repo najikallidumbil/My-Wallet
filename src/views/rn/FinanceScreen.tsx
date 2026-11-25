@@ -446,6 +446,11 @@ export const FinanceScreen: React.FC<FinanceScreenProps> = ({
                         {tx.transactionTime && (
                           <Text style={styles.txMetaDot}>• {tx.transactionTime}</Text>
                         )}
+                        {cat && (
+                          <Text style={styles.txMetaDot} numberOfLines={1}>
+                            • {cat.name}{tx.subcategoryName ? ` • ${tx.subcategoryName}` : ''}
+                          </Text>
+                        )}
                         {acc && <Text style={styles.txMetaDot}>• {acc.name}</Text>}
                         {tx.attachments && tx.attachments.length > 0 && (
                           <View style={styles.attachPill}>

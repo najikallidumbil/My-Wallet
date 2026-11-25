@@ -40,6 +40,9 @@ import {
   History,
   HardDrive,
   Save,
+  Tag,
+  ChevronRight,
+  Layers,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { useAuth } from '../../context/AuthContext';
@@ -49,6 +52,7 @@ import { formatRupees } from '../../lib/currency';
 import { SupabaseConfigModal } from '../auth/SupabaseConfigModal';
 import { ClearDataOtpModal } from './ClearDataOtpModal';
 import { PinSetupModal } from '../security/PinSetupModal';
+import { CategoryManagementModal } from './CategoryManagementModal';
 import { WalletBackupEntry } from '../../services/backupService';
 
 interface SettingsModalProps {
@@ -68,6 +72,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     creditDebtRecords,
     people,
     accounts,
+    categories,
     syncState,
     lastSyncedAt,
     pendingSyncCount,
@@ -139,6 +144,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
 
   // Toggle App Lock handler
   const handleToggleAppLock = async (value: boolean) => {
@@ -806,7 +812,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </View>
             </View>
 
-            {/* 4. PHYSICAL OPENING BALANCE */}
+            {/* 4. CATEGORIES & SUBCATEGORIES MANAGEMENT */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Tag size={16} color={colors.brand[600]} />
+                <Text style={styles.sectionTitle}>Categories & Subcategories</Text>
+              </View>
+              <Text style={styles.sectionDesc}>
+                Customize income & expense categories, subcategories, icons, and colors
+              </Text>
+
+              <TouchableOpacity
+                style={styles.categoryManageBtn}
+                onPress={() => setIsCategoryModalOpen(true)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.categoryManageLeft}>
+                  <View style={styles.categoryManageIcon}>
+                    <Layers size={18} color={colors.brand[600]} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.categoryManageTitle}>Manage Categories</Text>
+                    <Text style={styles.categoryManageSubtitle}>
+                      {categories.filter((c) => c.type === 'income').length} Income • {categories.filter((c) => c.type === 'expense').length} Expense categories
+                    </Text>
+                  </View>
+                </View>
+                <ChevronRight size={18} color={colors.slate[400]} />
+              </TouchableOpacity>
+            </View>
+
+            {/* 5. PHYSICAL OPENING BALANCE */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <Wallet size={16} color={colors.income.text} />
@@ -1016,6 +1052,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </View>
         </View>
       </Modal>
+
+      {/* CATEGORIES & SUBCATEGORIES MANAGEMENT MODAL */}
+      <CategoryManagementModal
+        visible={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+      />
 
       {/* SUPABASE CLOUD CONFIG MODAL */}
       <SupabaseConfigModal
@@ -1384,6 +1426,41 @@ const styles = StyleSheet.create({
   actionCardDesc: {
     fontSize: 10,
     color: colors.slate[400],
+  },
+  categoryManageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.white,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    marginTop: 4,
+  },
+  categoryManageLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  categoryManageIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: `${colors.brand[500]}15`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryManageTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.slate[800],
+  },
+  categoryManageSubtitle: {
+    fontSize: 11,
+    color: colors.slate[500],
+    marginTop: 1,
   },
   inputRow: {
     flexDirection: 'row',

@@ -32,6 +32,7 @@ import { useResponsive } from '../../lib/useResponsive';
 import { AddPersonModal } from './AddPersonModal';
 import { DateTimePickerField } from './DateTimePickerField';
 import { DatePickerField } from './DatePickerField';
+import { CategorySelector } from './CategorySelector';
 
 interface QuickAddModalProps {
   visible: boolean;
@@ -63,6 +64,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [subcategoryId, setSubcategoryId] = useState<string | undefined>(undefined);
+  const [subcategoryName, setSubcategoryName] = useState<string | undefined>(undefined);
   const [accountId, setAccountId] = useState(accounts[0]?.id || 'acc-cash');
   const [personName, setPersonName] = useState('');
   const [personPhone, setPersonPhone] = useState('');
@@ -97,6 +100,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       setPersonPhone(initialPersonPhone);
       setSelectedPersonId(null);
       setCategoryId('');
+      setSubcategoryId(undefined);
+      setSubcategoryName(undefined);
       setNotes('');
       setAttachments([]);
       setDueDate('');
@@ -263,6 +268,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
           title: cleanTitle,
           amount: numAmount,
           categoryId: categoryId || availableCategories[0]?.id || (mode === 'income' ? 'cat-inc-1' : 'cat-exp-1'),
+          subcategoryId,
+          subcategoryName,
           accountId: accountId || accounts[0]?.id || 'acc-cash',
           date,
           time,
@@ -595,35 +602,18 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
               </View>
             )}
 
-            {/* Category Selector (Income & Expense only) */}
+            {/* Trackwallet-Inspired Category & Subcategory Selector (Income & Expense) */}
             {(mode === 'income' || mode === 'expense') && (
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>CATEGORY</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catScroll}>
-                  {availableCategories.map((c) => (
-                    <TouchableOpacity
-                      key={c.id}
-                      style={[
-                        styles.catPill,
-                        (categoryId === c.id || (!categoryId && availableCategories[0]?.id === c.id)) &&
-                          styles.catPillActive,
-                      ]}
-                      onPress={() => setCategoryId(c.id)}
-                    >
-                      <View style={[styles.catDot, { backgroundColor: c.color }]} />
-                      <Text
-                        style={[
-                          styles.catPillText,
-                          (categoryId === c.id || (!categoryId && availableCategories[0]?.id === c.id)) &&
-                            styles.catPillTextActive,
-                        ]}
-                      >
-                        {c.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
+              <CategorySelector
+                mode={mode}
+                selectedCategoryId={categoryId || (availableCategories[0]?.id || '')}
+                selectedSubcategoryId={subcategoryId}
+                onSelect={(catId, subId, subName) => {
+                  setCategoryId(catId);
+                  setSubcategoryId(subId);
+                  setSubcategoryName(subName);
+                }}
+              />
             )}
 
             {/* Account Selector (Income & Expense only) */}

@@ -3,6 +3,7 @@ import {
   Account,
   AccountTransfer,
   Category,
+  SubCategory,
   Budget,
   Person,
   CreditDebtRecord,
@@ -11,6 +12,7 @@ import {
   ReminderPreferences,
   MessageRecord,
 } from '../types';
+import { INITIAL_CATEGORIES } from '../data/defaultData';
 
 export interface CloudPayload {
   openingBalance: number;
@@ -165,21 +167,21 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
     // Only consider cloud as having real user data if actual financial records exist
     const hasData = hasTransactions || hasKhata || hasPeople || (hasBudgets && budgetsRes.data.length > 0);
 
-    // Map subcategories by categoryId
-    const subcatsByCategory: Record<string, any[]> = {};
+    // Map subcategories by categoryId from Supabase
+    const customSubcatsByCategory: Record<string, SubCategory[]> = {};
     (subcategoriesRes.data || []).forEach((sc: any) => {
-      if (!subcatsByCategory[sc.category_id]) {
-        subcatsByCategory[sc.category_id] = [];
+      if (!customSubcatsByCategory[sc.category_id]) {
+        customSubcatsByCategory[sc.category_id] = [];
       }
-      subcatsByCategory[sc.category_id].push({
+      customSubcatsByCategory[sc.category_id].push({
         id: sc.id,
         name: sc.name,
         budget: Number(sc.budget) || 0,
       });
     });
 
-    // Map categories
-    const categories: Category[] = (categoriesRes.data || []).map((c: any) => ({
+    // Cloud categories from DB
+    const dbCategories: Category[] = (categoriesRes.data || []).map((c: any) => ({
       id: c.id,
       userId: c.user_id,
       name: c.name,
@@ -188,8 +190,43 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       color: c.color || '#6366f1',
       isDefault: c.is_default || false,
       budget: Number(c.budget) || 0,
-      subcategories: subcatsByCategory[c.id] || [],
+      subcategories: customSubcatsByCategory[c.id] || [],
     }));
+
+    // Merge: start with INITIAL_CATEGORIES and enrich with DB custom subcategories and categories
+    const categoryMap = new Map<string, Category>();
+    INITIAL_CATEGORIES.forEach((initCat) => {
+      const dbMatch = dbCategories.find((c) => c.id === initCat.id);
+      const customSubs = customSubcatsByCategory[initCat.id] || [];
+      const mergedSubs = [...(initCat.subcategories || [])];
+      customSubs.forEach((cs) => {
+        if (!mergedSubs.some((s) => s.id === cs.id || s.name.toLowerCase() === cs.name.toLowerCase())) {
+          mergedSubs.push(cs);
+        }
+      });
+
+      if (dbMatch) {
+        categoryMap.set(initCat.id, {
+          ...initCat,
+          ...dbMatch,
+          subcategories: mergedSubs,
+        });
+      } else {
+        categoryMap.set(initCat.id, {
+          ...initCat,
+          subcategories: mergedSubs,
+        });
+      }
+    });
+
+    // Add user custom categories that are not in INITIAL_CATEGORIES
+    dbCategories.forEach((dbCat) => {
+      if (!categoryMap.has(dbCat.id)) {
+        categoryMap.set(dbCat.id, dbCat);
+      }
+    });
+
+    const categories: Category[] = Array.from(categoryMap.values());
 
     // Map accounts
     const accounts: Account[] = (accountsRes.data || []).map((a: any) => ({
@@ -1142,6 +1179,221 @@ export async function syncTransferItem(
   const res = await cloudSaveTransfer(userId, transfer);
   if (!res.success) {
     throw new Error(`[account_transfers upsert] ${res.error?.message} (${res.error?.code || 'ERR'})`);
+  }
+}
+
+// ==============================================================================
+// DIRECT PERSISTENCE: CATEGORIES & SUBCATEGORIES
+// ==============================================================================
+
+export async function cloudSaveCategory(
+  userId: string,
+  category: Category
+): Promise<CloudOperationResult<Category>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'categories', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const row = {
+      id: category.id,
+      user_id: userId,
+      name: category.name.trim(),
+      type: category.type,
+      icon: category.icon || 'Tag',
+      color: category.color || '#6366f1',
+      is_default: category.isDefault ?? false,
+      budget: category.budget || 0,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await client.from('categories').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('categories', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'categories', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('categories', 'upsert', userId, true);
+    return { success: true, data: category };
+  } catch (err: any) {
+    logDbOperation('categories', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'categories', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudDeleteCategory(
+  userId: string,
+  categoryId: string,
+  reassignCategoryId?: string
+): Promise<CloudOperationResult<null>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'categories', operation: 'delete', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    if (reassignCategoryId) {
+      // Reassign transactions to target category
+      await client
+        .from('transactions')
+        .update({ category_id: reassignCategoryId, subcategory_id: null, subcategory_name: null })
+        .eq('category_id', categoryId)
+        .eq('user_id', userId);
+    } else {
+      // Clear category reference
+      await client
+        .from('transactions')
+        .update({ category_id: null, subcategory_id: null, subcategory_name: null })
+        .eq('category_id', categoryId)
+        .eq('user_id', userId);
+    }
+
+    // Delete subcategories belonging to this category
+    await client
+      .from('subcategories')
+      .delete()
+      .eq('category_id', categoryId)
+      .eq('user_id', userId);
+
+    // Delete category
+    const { error } = await client
+      .from('categories')
+      .delete()
+      .eq('id', categoryId)
+      .eq('user_id', userId);
+
+    if (error) {
+      logDbOperation('categories', 'delete', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'categories', operation: 'delete', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('categories', 'delete', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('categories', 'delete', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'categories', operation: 'delete', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudSaveSubcategory(
+  userId: string,
+  categoryId: string,
+  subcategory: SubCategory
+): Promise<CloudOperationResult<SubCategory>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'subcategories', operation: 'upsert', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    const row = {
+      id: subcategory.id,
+      user_id: userId,
+      category_id: categoryId,
+      name: subcategory.name.trim(),
+      budget: subcategory.budget || 0,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await client.from('subcategories').upsert(row, { onConflict: 'id' });
+    if (error) {
+      logDbOperation('subcategories', 'upsert', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'subcategories', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('subcategories', 'upsert', userId, true);
+    return { success: true, data: subcategory };
+  } catch (err: any) {
+    logDbOperation('subcategories', 'upsert', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'subcategories', operation: 'upsert', message: err.message || 'Unknown network error' },
+    };
+  }
+}
+
+export async function cloudDeleteSubcategory(
+  userId: string,
+  subcategoryId: string,
+  reassignSubcategoryId?: string,
+  reassignSubcategoryName?: string
+): Promise<CloudOperationResult<null>> {
+  const client = getSupabaseClient() as any;
+  if (!client) {
+    return {
+      success: false,
+      error: { table: 'subcategories', operation: 'delete', message: 'Supabase client unavailable' },
+    };
+  }
+
+  try {
+    if (reassignSubcategoryId) {
+      await client
+        .from('transactions')
+        .update({
+          subcategory_id: reassignSubcategoryId,
+          subcategory_name: reassignSubcategoryName || null,
+        })
+        .eq('subcategory_id', subcategoryId)
+        .eq('user_id', userId);
+    } else {
+      await client
+        .from('transactions')
+        .update({
+          subcategory_id: null,
+          subcategory_name: null,
+        })
+        .eq('subcategory_id', subcategoryId)
+        .eq('user_id', userId);
+    }
+
+    const { error } = await client
+      .from('subcategories')
+      .delete()
+      .eq('id', subcategoryId)
+      .eq('user_id', userId);
+
+    if (error) {
+      logDbOperation('subcategories', 'delete', userId, false, error);
+      return {
+        success: false,
+        error: { table: 'subcategories', operation: 'delete', code: error.code, message: error.message, details: error.details },
+      };
+    }
+
+    logDbOperation('subcategories', 'delete', userId, true);
+    return { success: true, data: null };
+  } catch (err: any) {
+    logDbOperation('subcategories', 'delete', userId, false, { message: err.message });
+    return {
+      success: false,
+      error: { table: 'subcategories', operation: 'delete', message: err.message || 'Unknown network error' },
+    };
   }
 }
 

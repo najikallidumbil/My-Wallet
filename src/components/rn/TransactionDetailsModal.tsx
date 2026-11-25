@@ -41,6 +41,7 @@ export const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = (
 
   const isInc = transaction.type === 'income';
   const cat = categories.find((c) => c.id === transaction.categoryId);
+  const subName = transaction.subcategoryName || cat?.subcategories?.find((s) => s.id === transaction.subcategoryId)?.name;
   const acc = accounts.find((a) => a.id === transaction.accountId);
 
   const handleDelete = () => {
@@ -103,7 +104,7 @@ export const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = (
                   <Tag size={16} color={colors.slate[600]} />
                 </View>
                 <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Category</Text>
+                  <Text style={styles.infoLabel}>Category & Subcategory</Text>
                   <View style={styles.catBadge}>
                     <CategoryIcon
                       name={cat?.icon}
@@ -111,6 +112,11 @@ export const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = (
                       color={cat?.color || colors.slate[600]}
                     />
                     <Text style={styles.infoValue}>{cat?.name || 'Uncategorized'}</Text>
+                    {!!subName && (
+                      <View style={styles.subBadge}>
+                        <Text style={styles.subBadgeText}>{subName}</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </View>
@@ -292,8 +298,23 @@ const styles = StyleSheet.create({
   catBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
     marginTop: 2,
+  },
+  subBadge: {
+    backgroundColor: colors.brand[50],
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    borderRadius: 6,
+    marginLeft: 2,
+  },
+  subBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.brand[700],
   },
   attachSection: {
     marginBottom: 16,

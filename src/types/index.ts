@@ -331,6 +331,8 @@ export interface QuickAddPayload {
   title: string;
   amount: number;
   categoryId?: string;
+  subcategoryId?: string;
+  subcategoryName?: string;
   accountId?: string;
   personId?: string;
   paymentMethod?: PaymentMethod;

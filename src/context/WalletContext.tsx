@@ -51,6 +51,10 @@ import {
   cloudDeleteTransaction,
   cloudSaveAccount,
   cloudDeleteAccount,
+  cloudSaveCategory,
+  cloudDeleteCategory,
+  cloudSaveSubcategory,
+  cloudDeleteSubcategory,
   cloudSaveTransfer,
   cloudSaveBudget,
   cloudSaveUserSettings,
@@ -159,8 +163,6 @@ interface WalletContextType {
   setCategoryBudget: (categoryId: string, amount: number, month?: string) => void;
   setOverallMonthlyBudget: (amount: number, month?: string) => void;
   deleteBudget: (categoryId: string, month?: string) => void;
-  addSubcategory: (categoryId: string, name: string, budget?: number) => void;
-  deleteSubcategory: (categoryId: string, subcategoryId: string) => void;
 
   // Transaction Actions
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Transaction>;
@@ -208,10 +210,13 @@ interface WalletContextType {
   deleteMessageRecord: (id: string) => void;
   clearMessageHistory: () => void;
 
-  // Category Actions
-  addCategory: (data: Omit<Category, 'id'>) => Category;
-  updateCategory: (id: string, updates: Partial<Category>) => void;
-  deleteCategory: (id: string) => void;
+  // Category & Subcategory Actions
+  addCategory: (data: Omit<Category, 'id'>) => Promise<Category>;
+  updateCategory: (id: string, updates: Partial<Category>) => Promise<Category>;
+  deleteCategory: (id: string, reassignCategoryId?: string) => Promise<void>;
+  addSubcategory: (categoryId: string, name: string, budget?: number) => Promise<SubCategory>;
+  updateSubcategory: (categoryId: string, subcategoryId: string, updates: Partial<SubCategory>) => Promise<SubCategory>;
+  deleteSubcategory: (categoryId: string, subcategoryId: string, reassignSubcategoryId?: string, reassignSubcategoryName?: string) => Promise<void>;
 
   // Recurring Actions
   addRecurringTransaction: (data: Omit<RecurringTransaction, 'id' | 'createdAt'>) => RecurringTransaction;
@@ -1441,22 +1446,277 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   // Category Actions
-  const addCategory = useCallback((data: Omit<Category, 'id'>) => {
-    const newCat: Category = {
-      ...data,
-      id: `cat-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-    };
-    setCategories((prev) => [...prev, newCat]);
-    return newCat;
-  }, []);
+  const addCategory = useCallback(
+    async (data: Omit<Category, 'id'>): Promise<Category> => {
+      const cleanName = data.name.trim();
+      if (!cleanName) {
+        throw new Error('Please enter a category name.');
+      }
 
-  const updateCategory = useCallback((id: string, updates: Partial<Category>) => {
-    setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
-  }, []);
+      // Check duplicate name for same type
+      const duplicate = categories.find(
+        (c) => c.type === data.type && c.name.toLowerCase() === cleanName.toLowerCase()
+      );
+      if (duplicate) {
+        throw new Error(`A category named "${cleanName}" already exists for ${data.type}.`);
+      }
 
-  const deleteCategory = useCallback((id: string) => {
-    setCategories((prev) => prev.filter((c) => c.id !== id));
-  }, []);
+      const newCat: Category = {
+        ...data,
+        name: cleanName,
+        id: `cat-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        userId: user?.id || null,
+        subcategories: data.subcategories || [],
+      };
+
+      if (user?.id) {
+        const res = await cloudSaveCategory(user.id, newCat);
+        if (!res.success) {
+          logDbOperation('categories', 'upsert', user.id, false, res.error);
+          throw new Error(res.error?.message || 'Failed to save category to database.');
+        }
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+
+      setCategories((prev) => [...prev, newCat]);
+      return newCat;
+    },
+    [categories, user]
+  );
+
+  const updateCategory = useCallback(
+    async (id: string, updates: Partial<Category>): Promise<Category> => {
+      let updatedCat: Category | undefined;
+
+      const existing = categories.find((c) => c.id === id);
+      if (!existing) {
+        throw new Error('Category not found.');
+      }
+
+      if (updates.name && updates.name.trim()) {
+        const cleanName = updates.name.trim();
+        const duplicate = categories.find(
+          (c) =>
+            c.id !== id &&
+            c.type === (updates.type || existing.type) &&
+            c.name.toLowerCase() === cleanName.toLowerCase()
+        );
+        if (duplicate) {
+          throw new Error(`A category named "${cleanName}" already exists.`);
+        }
+      }
+
+      updatedCat = {
+        ...existing,
+        ...updates,
+        name: updates.name ? updates.name.trim() : existing.name,
+      };
+
+      if (user?.id) {
+        const res = await cloudSaveCategory(user.id, updatedCat);
+        if (!res.success) {
+          logDbOperation('categories', 'upsert', user.id, false, res.error);
+          throw new Error(res.error?.message || 'Failed to update category in database.');
+        }
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+
+      setCategories((prev) => prev.map((c) => (c.id === id ? updatedCat! : c)));
+      return updatedCat;
+    },
+    [categories, user]
+  );
+
+  const deleteCategory = useCallback(
+    async (id: string, reassignCategoryId?: string): Promise<void> => {
+      if (reassignCategoryId) {
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.categoryId === id
+              ? { ...t, categoryId: reassignCategoryId, subcategoryId: undefined, subcategoryName: undefined }
+              : t
+          )
+        );
+      } else {
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.categoryId === id
+              ? { ...t, categoryId: '', subcategoryId: undefined, subcategoryName: undefined }
+              : t
+          )
+        );
+      }
+
+      if (user?.id) {
+        const res = await cloudDeleteCategory(user.id, id, reassignCategoryId);
+        if (!res.success) {
+          logDbOperation('categories', 'delete', user.id, false, res.error);
+          throw new Error(res.error?.message || 'Failed to delete category from database.');
+        }
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+    },
+    [user]
+  );
+
+  // Subcategory Actions
+  const addSubcategory = useCallback(
+    async (categoryId: string, name: string, budget?: number): Promise<SubCategory> => {
+      const cleanName = name.trim();
+      if (!cleanName) {
+        throw new Error('Please enter a subcategory name.');
+      }
+
+      const targetCat = categories.find((c) => c.id === categoryId);
+      if (!targetCat) {
+        throw new Error('Parent category not found.');
+      }
+
+      const subs = targetCat.subcategories || [];
+      const duplicate = subs.find((s) => s.name.toLowerCase() === cleanName.toLowerCase());
+      if (duplicate) {
+        throw new Error(`Subcategory "${cleanName}" already exists in ${targetCat.name}.`);
+      }
+
+      const newSub: SubCategory = {
+        id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        name: cleanName,
+        budget: budget || undefined,
+      };
+
+      if (user?.id) {
+        const res = await cloudSaveSubcategory(user.id, categoryId, newSub);
+        if (!res.success) {
+          logDbOperation('subcategories', 'upsert', user.id, false, res.error);
+          throw new Error(res.error?.message || 'Failed to save subcategory to database.');
+        }
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+
+      setCategories((prev) =>
+        prev.map((c) => {
+          if (c.id !== categoryId) return c;
+          const currentSubs = c.subcategories || [];
+          return { ...c, subcategories: [...currentSubs, newSub] };
+        })
+      );
+
+      return newSub;
+    },
+    [categories, user]
+  );
+
+  const updateSubcategory = useCallback(
+    async (categoryId: string, subcategoryId: string, updates: Partial<SubCategory>): Promise<SubCategory> => {
+      const targetCat = categories.find((c) => c.id === categoryId);
+      if (!targetCat) throw new Error('Parent category not found.');
+
+      const subs = targetCat.subcategories || [];
+      const existing = subs.find((s) => s.id === subcategoryId);
+      if (!existing) throw new Error('Subcategory not found.');
+
+      if (updates.name && updates.name.trim()) {
+        const cleanName = updates.name.trim();
+        const duplicate = subs.find(
+          (s) => s.id !== subcategoryId && s.name.toLowerCase() === cleanName.toLowerCase()
+        );
+        if (duplicate) {
+          throw new Error(`Subcategory "${cleanName}" already exists in ${targetCat.name}.`);
+        }
+      }
+
+      const updatedSub: SubCategory = {
+        ...existing,
+        ...updates,
+        name: updates.name ? updates.name.trim() : existing.name,
+      };
+
+      if (user?.id) {
+        const res = await cloudSaveSubcategory(user.id, categoryId, updatedSub);
+        if (!res.success) {
+          logDbOperation('subcategories', 'upsert', user.id, false, res.error);
+          throw new Error(res.error?.message || 'Failed to update subcategory in database.');
+        }
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+
+      // Update in categories state
+      setCategories((prev) =>
+        prev.map((c) => {
+          if (c.id !== categoryId) return c;
+          return {
+            ...c,
+            subcategories: (c.subcategories || []).map((s) => (s.id === subcategoryId ? updatedSub : s)),
+          };
+        })
+      );
+
+      // If name was updated, update transaction subcategoryName for consistency
+      if (updates.name && updates.name.trim()) {
+        const newName = updates.name.trim();
+        setTransactions((prev) =>
+          prev.map((t) => (t.subcategoryId === subcategoryId ? { ...t, subcategoryName: newName } : t))
+        );
+      }
+
+      return updatedSub;
+    },
+    [categories, user]
+  );
+
+  const deleteSubcategory = useCallback(
+    async (
+      categoryId: string,
+      subcategoryId: string,
+      reassignSubcategoryId?: string,
+      reassignSubcategoryName?: string
+    ): Promise<void> => {
+      if (reassignSubcategoryId) {
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.subcategoryId === subcategoryId
+              ? { ...t, subcategoryId: reassignSubcategoryId, subcategoryName: reassignSubcategoryName }
+              : t
+          )
+        );
+      } else {
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.subcategoryId === subcategoryId
+              ? { ...t, subcategoryId: undefined, subcategoryName: undefined }
+              : t
+          )
+        );
+      }
+
+      if (user?.id) {
+        const res = await cloudDeleteSubcategory(
+          user.id,
+          subcategoryId,
+          reassignSubcategoryId,
+          reassignSubcategoryName
+        );
+        if (!res.success) {
+          logDbOperation('subcategories', 'delete', user.id, false, res.error);
+          throw new Error(res.error?.message || 'Failed to delete subcategory from database.');
+        }
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      }
+
+      setCategories((prev) =>
+        prev.map((c) => {
+          if (c.id !== categoryId) return c;
+          return {
+            ...c,
+            subcategories: (c.subcategories || []).filter((s) => s.id !== subcategoryId),
+          };
+        })
+      );
+    },
+    [user]
+  );
 
   // Budget Actions
   const setCategoryBudget = useCallback((categoryId: string, amount: number, monthStr?: string) => {
@@ -1550,33 +1810,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     );
   }, []);
 
-  const addSubcategory = useCallback((categoryId: string, name: string, budget?: number) => {
-    const newSub: SubCategory = {
-      id: `sub-${Date.now()}`,
-      name: name.trim(),
-      budget,
-    };
-    setCategories((prev) =>
-      prev.map((c) => {
-        if (c.id !== categoryId) return c;
-        const subs = c.subcategories || [];
-        return { ...c, subcategories: [...subs, newSub] };
-      })
-    );
-  }, []);
-
-  const deleteSubcategory = useCallback((categoryId: string, subcategoryId: string) => {
-    setCategories((prev) =>
-      prev.map((c) => {
-        if (c.id !== categoryId) return c;
-        return {
-          ...c,
-          subcategories: (c.subcategories || []).filter((s) => s.id !== subcategoryId),
-        };
-      })
-    );
-  }, []);
-
   // Recurring Actions
   const addRecurringTransaction = useCallback((data: Omit<RecurringTransaction, 'id' | 'createdAt'>) => {
     const newRec: RecurringTransaction = {
@@ -1645,6 +1878,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           amount: payload.amount,
           type: payload.mode,
           categoryId: payload.categoryId || (payload.mode === 'income' ? 'cat-inc-1' : 'cat-exp-1'),
+          subcategoryId: payload.subcategoryId,
+          subcategoryName: payload.subcategoryName,
           accountId: payload.accountId,
           paymentMethod: payload.paymentMethod || 'upi',
           transactionDate: payload.date,
@@ -2074,8 +2309,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setCategoryBudget,
         setOverallMonthlyBudget,
         deleteBudget,
-        addSubcategory,
-        deleteSubcategory,
         addTransaction,
         updateTransaction,
         deleteTransaction,
@@ -2101,6 +2334,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addCategory,
         updateCategory,
         deleteCategory,
+        addSubcategory,
+        updateSubcategory,
+        deleteSubcategory,
         addRecurringTransaction,
         updateRecurringTransaction,
         deleteRecurringTransaction,

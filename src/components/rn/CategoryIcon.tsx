@@ -24,6 +24,21 @@ import {
   User,
   ArrowUpRight,
   ArrowDownLeft,
+  Coffee,
+  Fuel,
+  Plane,
+  Dumbbell,
+  BookOpen,
+  Shield,
+  Smile,
+  Music,
+  Tv,
+  Gamepad2,
+  Wrench,
+  Truck,
+  Scissors,
+  Package,
+  Folder,
 } from 'lucide-react-native';
 
 interface CategoryIconProps {
@@ -86,6 +101,36 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({
       return <ArrowUpRight {...iconProps} />;
     case 'arrowdownleft':
       return <ArrowDownLeft {...iconProps} />;
+    case 'coffee':
+      return <Coffee {...iconProps} />;
+    case 'fuel':
+      return <Fuel {...iconProps} />;
+    case 'plane':
+      return <Plane {...iconProps} />;
+    case 'dumbbell':
+      return <Dumbbell {...iconProps} />;
+    case 'bookopen':
+      return <BookOpen {...iconProps} />;
+    case 'shield':
+      return <Shield {...iconProps} />;
+    case 'smile':
+      return <Smile {...iconProps} />;
+    case 'music':
+      return <Music {...iconProps} />;
+    case 'tv':
+      return <Tv {...iconProps} />;
+    case 'gamepad2':
+      return <Gamepad2 {...iconProps} />;
+    case 'wrench':
+      return <Wrench {...iconProps} />;
+    case 'truck':
+      return <Truck {...iconProps} />;
+    case 'scissors':
+      return <Scissors {...iconProps} />;
+    case 'package':
+      return <Package {...iconProps} />;
+    case 'folder':
+      return <Folder {...iconProps} />;
     default:
       return <Tag {...iconProps} />;
   }
