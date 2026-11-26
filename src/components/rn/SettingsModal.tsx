@@ -93,6 +93,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     user,
     profile,
     registeredMobile,
+    setRegisteredMobile,
+    removeRegisteredMobile,
     signOut,
     requestRecoveryEmailOtp,
     verifyRecoveryEmailOtp,
@@ -137,6 +139,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [recoverySuccess, setRecoverySuccess] = useState<string | null>(null);
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
+
+  // Optional Mobile Number State
+  const [isMobileModalOpen, setIsMobileModalOpen] = useState(false);
+  const [mobileInputValue, setMobileInputValue] = useState('');
+  const [mobileModalError, setMobileModalError] = useState<string | null>(null);
+  const [isSavingMobile, setIsSavingMobile] = useState(false);
 
   // Restore JSON modal states
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
@@ -375,6 +383,76 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  // Mobile Number Handlers (Optional, User-Scoped, Direct to Supabase)
+  const handleOpenAddMobile = () => {
+    setMobileInputValue('');
+    setMobileModalError(null);
+    setIsMobileModalOpen(true);
+  };
+
+  const handleOpenEditMobile = () => {
+    setMobileInputValue(registeredMobile || '');
+    setMobileModalError(null);
+    setIsMobileModalOpen(true);
+  };
+
+  const handleSaveMobileNumber = async () => {
+    const cleaned = mobileInputValue.trim();
+    if (!cleaned) {
+      setMobileModalError('Please enter a mobile number or close the dialog.');
+      return;
+    }
+    const digitsOnly = cleaned.replace(/\D/g, '');
+    if (digitsOnly.length < 7) {
+      setMobileModalError('Please enter a valid phone number with at least 7 digits.');
+      return;
+    }
+
+    setIsSavingMobile(true);
+    setMobileModalError(null);
+    try {
+      const res = await setRegisteredMobile(cleaned);
+      if (res.success) {
+        setIsMobileModalOpen(false);
+      } else {
+        setMobileModalError(res.error || 'Failed to update mobile number');
+      }
+    } catch (e: any) {
+      setMobileModalError(e?.message || 'Failed to save mobile number');
+    } finally {
+      setIsSavingMobile(false);
+    }
+  };
+
+  const handleConfirmRemoveMobile = () => {
+    Alert.alert(
+      'Remove Mobile Number',
+      'Are you sure you want to remove your mobile number from your profile?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setIsSavingMobile(true);
+            try {
+              const res = await removeRegisteredMobile();
+              if (res.success) {
+                setIsMobileModalOpen(false);
+              } else {
+                Alert.alert('Error', res.error || 'Failed to remove mobile number');
+              }
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Failed to remove mobile number');
+            } finally {
+              setIsSavingMobile(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // Clear All Data - Protected by OTP Security
   const handleClearAll = () => {
     setIsClearDataOtpModalOpen(true);
@@ -426,21 +504,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </View>
                   </View>
 
-                  {/* Registered Mobile for Security OTP */}
+                  {/* Mobile Number (Optional, User-Scoped) */}
                   <View style={styles.emailRow}>
                     <View style={[styles.emailIconBox, { backgroundColor: colors.brand[50] }]}>
                       <Phone size={16} color={colors.brand[600]} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.emailLabel}>Registered Mobile</Text>
-                      <Text style={styles.emailValue}>
-                        {registeredMobile || '+91 98765 43210'}
-                      </Text>
+                      <Text style={styles.emailLabel}>Mobile Number</Text>
+                      {registeredMobile ? (
+                        <Text style={styles.emailValue}>{registeredMobile}</Text>
+                      ) : (
+                        <Text style={styles.emptyMobileText}>Not added (Optional)</Text>
+                      )}
                     </View>
-                    <View style={styles.verifiedBadge}>
-                      <Check size={12} color={colors.income.text} />
-                      <Text style={styles.verifiedText}>Protected</Text>
-                    </View>
+                    {registeredMobile ? (
+                      <View style={styles.mobileActionsContainer}>
+                        <TouchableOpacity
+                          style={styles.mobileEditBtn}
+                          onPress={handleOpenEditMobile}
+                        >
+                          <Text style={styles.mobileEditBtnText}>Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.mobileRemoveBtn}
+                          onPress={handleConfirmRemoveMobile}
+                        >
+                          <Trash2 size={14} color={colors.expense.text} />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.addMobileBtn}
+                        onPress={handleOpenAddMobile}
+                      >
+                        <Text style={styles.addMobileBtnText}>+ Add Mobile Number</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Backup / Recovery Email */}
@@ -1053,6 +1152,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </View>
       </Modal>
 
+      {/* OPTIONAL MOBILE NUMBER MODAL */}
+      <Modal visible={isMobileModalOpen} transparent animationType="fade">
+        <View style={styles.backdrop}>
+          <View style={styles.innerModalCard}>
+            <View style={styles.header}>
+              <Text style={styles.innerModalTitle}>
+                {registeredMobile ? 'Edit Mobile Number' : 'Add Mobile Number'}
+              </Text>
+              <TouchableOpacity onPress={() => setIsMobileModalOpen(false)}>
+                <X size={20} color={colors.slate[500]} />
+              </TouchableOpacity>
+            </View>
+
+            {mobileModalError && (
+              <View style={styles.errorBox}>
+                <AlertCircle size={14} color={colors.expense.text} />
+                <Text style={styles.errorText}>{mobileModalError}</Text>
+              </View>
+            )}
+
+            <View style={{ gap: 12 }}>
+              <Text style={styles.innerModalDesc}>
+                Your mobile number is optional and saved directly to your account profile. No SMS OTP is required.
+              </Text>
+              <TextInput
+                style={styles.modalTextInput}
+                placeholder="e.g. +91 98765 43210"
+                placeholderTextColor={colors.slate[400]}
+                value={mobileInputValue}
+                onChangeText={setMobileInputValue}
+                keyboardType="phone-pad"
+                autoFocus
+              />
+              <TouchableOpacity
+                style={styles.modalPrimaryBtn}
+                onPress={handleSaveMobileNumber}
+                disabled={isSavingMobile}
+              >
+                {isSavingMobile ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Text style={styles.modalPrimaryBtnText}>
+                    {registeredMobile ? 'Update Mobile Number' : 'Save Mobile Number'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              {registeredMobile && (
+                <TouchableOpacity
+                  style={[styles.modalSecondaryBtn, { borderColor: colors.expense.border, marginTop: 4 }]}
+                  onPress={handleConfirmRemoveMobile}
+                  disabled={isSavingMobile}
+                >
+                  <Text style={[styles.modalSecondaryBtnText, { color: colors.expense.text }]}>
+                    Remove Number from Profile
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* CATEGORIES & SUBCATEGORIES MANAGEMENT MODAL */}
       <CategoryManagementModal
         visible={isCategoryModalOpen}
@@ -1288,6 +1450,45 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: colors.white,
+  },
+  emptyMobileText: {
+    fontSize: 12,
+    color: colors.slate[400],
+    fontStyle: 'italic',
+  },
+  addMobileBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: colors.brand[50],
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+    borderRadius: 6,
+  },
+  addMobileBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.brand[600],
+  },
+  mobileActionsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mobileEditBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: colors.slate[100],
+    borderRadius: 6,
+  },
+  mobileEditBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.slate[700],
+  },
+  mobileRemoveBtn: {
+    padding: 5,
+    borderRadius: 6,
+    backgroundColor: '#fff1f2',
   },
   signOutBtn: {
     flexDirection: 'row',
@@ -1578,6 +1779,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: colors.white,
+  },
+  modalSecondaryBtn: {
+    height: 40,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalSecondaryBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.slate[700],
   },
   errorBox: {
     flexDirection: 'row',

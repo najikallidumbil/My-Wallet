@@ -33,7 +33,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   registeredMobile: string;
-  setRegisteredMobile: (mobile: string) => Promise<void>;
+  setRegisteredMobile: (mobile: string) => Promise<{ success: boolean; error?: string }>;
+  removeRegisteredMobile: () => Promise<{ success: boolean; error?: string }>;
   enableGuestMode: () => void;
   checkConnection: (url?: string, key?: string) => Promise<boolean>;
   saveCredentials: (url: string, key: string) => Promise<{ success: boolean; error?: string }>;
@@ -43,7 +44,6 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const GUEST_MODE_STORAGE_KEY = 'my_wallet_guest_mode_v1';
-const REGISTERED_MOBILE_STORAGE_KEY = 'my_wallet_registered_mobile_v1';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -85,7 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: data.id,
           email: data.email,
           fullName: data.full_name,
-          phone: data.phone,
+          phone: data.phone || undefined,
           avatarUrl: data.avatar_url,
           currency: data.currency || 'INR',
           themePreference: data.theme_preference || 'light',
@@ -95,10 +95,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: data.created_at,
           updatedAt: data.updated_at,
         });
+        // Associate mobile strictly with this user's profile:
+        setRegisteredMobileState(data.phone || '');
         if (data.phone) {
-          setRegisteredMobileState(data.phone);
+          storage.setItem(`my_wallet_user_mobile_${userId}`, data.phone).catch(console.warn);
+        } else {
+          storage.removeItem(`my_wallet_user_mobile_${userId}`).catch(console.warn);
         }
       } else {
+        setRegisteredMobileState('');
         // Safe profile initialization for newly authenticated OTP users
         const { data: userData } = await client.auth.getUser();
         const currentEmail = userData?.user?.email || '';
@@ -167,10 +172,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async function initAuth() {
       try {
         // 1. Parallel local storage initialization (fast & offline-safe)
-        const [_, guestVal, storedMobile] = await Promise.all([
+        const [_, guestVal] = await Promise.all([
           initSupabaseCredentials().catch((err) => console.warn('initSupabaseCredentials notice:', err)),
           storage.getItem(GUEST_MODE_STORAGE_KEY).catch(() => null),
-          storage.getItem(REGISTERED_MOBILE_STORAGE_KEY).catch(() => null),
+          // Clean up legacy global phone key so it never leaks across accounts
+          storage.removeItem('my_wallet_registered_mobile_v1').catch(() => null),
         ]);
 
         if (!mounted) return;
@@ -180,9 +186,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (guestVal === 'true') {
           setIsGuestMode(true);
-        }
-        if (storedMobile) {
-          setRegisteredMobileState(storedMobile);
         }
 
         if (!configured) {
@@ -220,11 +223,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsLoading(false);
             clearTimeout(safetyTimer);
 
-            // Background profile fetch (never blocks app launch or delays opening)
+            // Preload user's own isolated mobile from local storage while profile loads in background
             if (initialSession?.user) {
+              storage.getItem(`my_wallet_user_mobile_${initialSession.user.id}`).then((storedPhone) => {
+                if (storedPhone && mounted) {
+                  setRegisteredMobileState(storedPhone);
+                }
+              }).catch(() => null);
+
               loadProfile(initialSession.user.id).catch((pErr) =>
                 console.warn('[Auth] Background profile load notice:', pErr)
               );
+            } else {
+              setRegisteredMobileState('');
             }
           }
         } catch (sessErr) {
@@ -568,6 +579,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     setSession(null);
     setProfile(null);
+    setRegisteredMobileState('');
     setIsGuestMode(false);
     await storage.removeItem(GUEST_MODE_STORAGE_KEY);
   };
@@ -584,19 +596,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const setRegisteredMobile = useCallback(async (mobile: string) => {
+  const setRegisteredMobile = useCallback(async (mobile: string): Promise<{ success: boolean; error?: string }> => {
     const cleaned = mobile.trim();
+    if (!user) return { success: false, error: 'User is not signed in.' };
+
     setRegisteredMobileState(cleaned);
-    await storage.setItem(REGISTERED_MOBILE_STORAGE_KEY, cleaned);
-    if (user) {
-      setProfile((prev) => (prev ? { ...prev, phone: cleaned } : prev));
-      const client = getSupabaseClient() as any;
-      if (client) {
-        try {
-          await client.from('profiles').update({ phone: cleaned }).eq('id', user.id);
-        } catch (_) {}
+    setProfile((prev) => (prev ? { ...prev, phone: cleaned || undefined } : prev));
+
+    if (cleaned) {
+      await storage.setItem(`my_wallet_user_mobile_${user.id}`, cleaned);
+    } else {
+      await storage.removeItem(`my_wallet_user_mobile_${user.id}`);
+    }
+
+    const client = getSupabaseClient() as any;
+    if (client) {
+      try {
+        const { error } = await client.from('profiles').update({ phone: cleaned || null }).eq('id', user.id);
+        if (error) {
+          console.warn('[Auth] Error updating mobile in Supabase profile:', error.message);
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.warn('[Auth] Network notice updating mobile:', err);
       }
     }
+    return { success: true };
+  }, [user]);
+
+  const removeRegisteredMobile = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'User is not signed in.' };
+
+    setRegisteredMobileState('');
+    setProfile((prev) => (prev ? { ...prev, phone: undefined } : prev));
+    await storage.removeItem(`my_wallet_user_mobile_${user.id}`);
+
+    const client = getSupabaseClient() as any;
+    if (client) {
+      try {
+        const { error } = await client.from('profiles').update({ phone: null }).eq('id', user.id);
+        if (error) {
+          console.warn('[Auth] Error clearing mobile in Supabase profile:', error.message);
+          return { success: false, error: error.message };
+        }
+      } catch (err: any) {
+        console.warn('[Auth] Network notice clearing mobile:', err);
+      }
+    }
+    return { success: true };
   }, [user]);
 
   return (
@@ -607,6 +654,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profile,
         registeredMobile,
         setRegisteredMobile,
+        removeRegisteredMobile,
         isLoading,
         isConfigured,
         isGuestMode,
