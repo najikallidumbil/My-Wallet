@@ -153,73 +153,106 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return res.success;
   }, []);
 
-  // Initialize stored credentials, session and connection test
+  // Initialize stored credentials, session and connection test with instant non-blocking launch
   useEffect(() => {
     let mounted = true;
 
-    async function initAuth() {
-      // 1. Initialize credentials from storage (if saved)
-      await initSupabaseCredentials();
-
-      const configured = isSupabaseConfigured();
+    // Safety timeout: under no circumstances should the loading screen hang beyond 1000ms
+    const safetyTimer = setTimeout(() => {
       if (mounted) {
+        setIsLoading(false);
+      }
+    }, 1000);
+
+    async function initAuth() {
+      try {
+        // 1. Parallel local storage initialization (fast & offline-safe)
+        const [_, guestVal, storedMobile] = await Promise.all([
+          initSupabaseCredentials().catch((err) => console.warn('initSupabaseCredentials notice:', err)),
+          storage.getItem(GUEST_MODE_STORAGE_KEY).catch(() => null),
+          storage.getItem(REGISTERED_MOBILE_STORAGE_KEY).catch(() => null),
+        ]);
+
+        if (!mounted) return;
+
+        const configured = isSupabaseConfigured();
         setIsConfigured(configured);
-      }
 
-      // Check if guest mode was previously enabled
-      const guestVal = await storage.getItem(GUEST_MODE_STORAGE_KEY);
-      if (guestVal === 'true' && mounted) {
-        setIsGuestMode(true);
-      }
+        if (guestVal === 'true') {
+          setIsGuestMode(true);
+        }
+        if (storedMobile) {
+          setRegisteredMobileState(storedMobile);
+        }
 
-      // Check stored registered mobile
-      const storedMobile = await storage.getItem(REGISTERED_MOBILE_STORAGE_KEY);
-      if (storedMobile && mounted) {
-        setRegisteredMobileState(storedMobile);
-      }
-
-      if (!configured) {
-        if (mounted) {
+        if (!configured) {
           setConnectionStatus('not_configured');
           setIsLoading(false);
-        }
-        return;
-      }
-
-      // 2. Perform live network connection check (does not display 'connected' without verifying)
-      const testRes = await testSupabaseConnection();
-      if (mounted) {
-        setConnectionStatus(testRes.status);
-        setConnectionError(testRes.error || null);
-        setLatencyMs(testRes.latencyMs || null);
-        setProjectDomain(testRes.projectDomain || null);
-      }
-
-      const client = getSupabaseClient();
-      if (!client) {
-        if (mounted) setIsLoading(false);
-        return;
-      }
-
-      try {
-        const {
-          data: { session: initialSession },
-          error,
-        } = await client.auth.getSession();
-
-        if (error) {
-          console.warn('Error getting session:', error.message);
+          clearTimeout(safetyTimer);
+          return;
         }
 
-        if (mounted) {
-          setSession(initialSession);
-          setUser(initialSession?.user || null);
-          if (initialSession?.user) {
-            await loadProfile(initialSession.user.id);
+        const client = getSupabaseClient();
+        if (!client) {
+          setIsLoading(false);
+          clearTimeout(safetyTimer);
+          return;
+        }
+
+        // 2. Instant Local Session Retrieval (Supabase reads from local AsyncStorage in < 15ms)
+        try {
+          const { data: { session: initialSession }, error } = await Promise.race([
+            client.auth.getSession(),
+            new Promise<{ data: { session: null }; error: null }>((resolve) =>
+              setTimeout(() => resolve({ data: { session: null }, error: null }), 600)
+            ),
+          ]);
+
+          if (error) {
+            console.warn('[Auth] Session notice:', error.message);
+          }
+
+          if (mounted) {
+            setSession(initialSession);
+            setUser(initialSession?.user || null);
+
+            // UNBLOCK APP STARTUP IMMEDIATELY! User enters app instantly without waiting for network pings
+            setIsLoading(false);
+            clearTimeout(safetyTimer);
+
+            // Background profile fetch (never blocks app launch or delays opening)
+            if (initialSession?.user) {
+              loadProfile(initialSession.user.id).catch((pErr) =>
+                console.warn('[Auth] Background profile load notice:', pErr)
+              );
+            }
+          }
+        } catch (sessErr) {
+          console.warn('[Auth] Local session check error:', sessErr);
+          if (mounted) {
+            setIsLoading(false);
+            clearTimeout(safetyTimer);
           }
         }
 
-        // 3. Listen for auth changes
+        // 3. Background Network Connection Check (Never blocks startup UI or causes "verifying" lag)
+        testSupabaseConnection()
+          .then((testRes) => {
+            if (mounted) {
+              setConnectionStatus(testRes.status);
+              setConnectionError(testRes.error || null);
+              setLatencyMs(testRes.latencyMs || null);
+              setProjectDomain(testRes.projectDomain || null);
+            }
+          })
+          .catch((connErr) => {
+            if (mounted) {
+              setConnectionStatus('offline');
+              setConnectionError(connErr.message || 'Offline mode');
+            }
+          });
+
+        // 4. Listen for auth changes
         const {
           data: { subscription },
         } = client.auth.onAuthStateChange(async (_event, newSession) => {
@@ -228,13 +261,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(newSession?.user || null);
 
           if (newSession?.user) {
-            await loadProfile(newSession.user.id);
+            loadProfile(newSession.user.id).catch(console.warn);
           } else {
             setProfile(null);
           }
         });
 
-        // 4. Handle incoming deep links for magic link authentication
+        // 5. Handle incoming deep links for magic link authentication
         const handleDeepLink = async (url: string | null) => {
           if (!url || !mounted) return;
           const currentClient = getSupabaseClient();
@@ -266,14 +299,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (!error && data.session?.user && mounted) {
                 setSession(data.session);
                 setUser(data.session.user);
-                await loadProfile(data.session.user.id);
+                loadProfile(data.session.user.id).catch(console.warn);
               }
             } else if (code) {
               const { data, error } = await (currentClient.auth as any).exchangeCodeForSession(code);
               if (!error && data.session?.user && mounted) {
                 setSession(data.session);
                 setUser(data.session.user);
-                await loadProfile(data.session.user.id);
+                loadProfile(data.session.user.id).catch(console.warn);
               }
             }
           } catch (err) {
@@ -293,6 +326,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } finally {
         if (mounted) {
           setIsLoading(false);
+          clearTimeout(safetyTimer);
         }
       }
     }
@@ -301,6 +335,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => {
       mounted = false;
+      clearTimeout(safetyTimer);
     };
   }, [configVersion, loadProfile]);
 

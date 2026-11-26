@@ -96,21 +96,33 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
   const backgroundTimeRef = useRef<number | null>(null);
 
-  // Initialize security preferences on cold start
+  // Initialize security preferences on cold start with fast parallel loading
   useEffect(() => {
+    let mounted = true;
+    const safetyTimer = setTimeout(() => {
+      if (mounted) setIsInitialized(true);
+    }, 800);
+
     async function initSecurity() {
       try {
-        // 1. Detect hardware biometrics
-        const capability = await getBiometricCapability();
-        setBiometricCapability(capability);
-
-        // 2. Load stored settings
-        const [storedAppLock, storedBio, storedPinHash, storedDuration] = await Promise.all([
-          storage.getItem(STORAGE_KEYS.APP_LOCK_ENABLED),
-          storage.getItem(STORAGE_KEYS.BIOMETRIC_ENABLED),
-          storage.getItem(STORAGE_KEYS.PIN_HASH),
-          storage.getItem(STORAGE_KEYS.AUTO_LOCK_DURATION),
+        // Parallelize biometric capability detection with storage reads for maximum startup speed
+        const [capability, storedAppLock, storedBio, storedPinHash, storedDuration] = await Promise.all([
+          getBiometricCapability().catch(() => ({
+            hasHardware: false,
+            isEnrolled: false,
+            supportedTypes: [],
+            primaryType: 'none' as const,
+            typeLabel: 'Biometrics',
+          })),
+          storage.getItem(STORAGE_KEYS.APP_LOCK_ENABLED).catch(() => null),
+          storage.getItem(STORAGE_KEYS.BIOMETRIC_ENABLED).catch(() => null),
+          storage.getItem(STORAGE_KEYS.PIN_HASH).catch(() => null),
+          storage.getItem(STORAGE_KEYS.AUTO_LOCK_DURATION).catch(() => null),
         ]);
+
+        if (!mounted) return;
+
+        setBiometricCapability(capability);
 
         const appLockEnabled = storedAppLock === 'true';
         const bioEnabled = storedBio === 'true';
@@ -129,11 +141,19 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch (err) {
         console.warn('Failed to initialize app security:', err);
       } finally {
-        setIsInitialized(true);
+        if (mounted) {
+          setIsInitialized(true);
+          clearTimeout(safetyTimer);
+        }
       }
     }
 
     initSecurity();
+
+    return () => {
+      mounted = false;
+      clearTimeout(safetyTimer);
+    };
   }, []);
 
   // Native AppState listener for Auto Lock when app goes to background

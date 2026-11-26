@@ -307,7 +307,7 @@ export const testSupabaseConnection = async (
   const startTime = Date.now();
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
     // 1. Check Auth health endpoint with the apikey header
     const authRes = await fetch(`${cleanUrl}/auth/v1/health`, {

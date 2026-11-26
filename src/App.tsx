@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -60,11 +60,18 @@ const MainScreen: React.FC = () => {
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<PersonSummary | null>(null);
 
-  if (!isHydrated) {
+  // Fast hydration fallback to guarantee instant startup without blocking the UI
+  const [hydrationTimeout, setHydrationTimeout] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setHydrationTimeout(true), 600);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!isHydrated && !hydrationTimeout) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.brand[600]} />
-        <Text style={styles.loadingText}>Opening your secure wallet...</Text>
+        <Text style={styles.loadingText}>Opening MY WALLET...</Text>
       </View>
     );
   }
@@ -119,17 +126,17 @@ const MainScreen: React.FC = () => {
             onSelectMode={(mode) => setCurrentMode(mode)}
           />
 
-          {/* Main View for Active Mode */}
+          {/* Main View for Active Mode: Keep tabs alive with display: none for instant 0ms switching */}
           <View style={styles.content}>
-            {currentMode === 'income_expense' && (
+            <View style={[styles.screenTab, currentMode === 'income_expense' ? styles.screenTabActive : styles.screenTabInactive]}>
               <FinanceScreen
                 onAddIncome={() => handleOpenQuickAdd('income')}
                 onAddExpense={() => handleOpenQuickAdd('expense')}
                 onSelectTransaction={(tx) => setSelectedTx(tx)}
               />
-            )}
+            </View>
 
-            {currentMode === 'khata_book' && (
+            <View style={[styles.screenTab, currentMode === 'khata_book' ? styles.screenTabActive : styles.screenTabInactive]}>
               <KhataScreen
                 onLendMoney={() => handleOpenQuickAdd('credit')}
                 onReceiveMoney={() => {
@@ -144,14 +151,14 @@ const MainScreen: React.FC = () => {
                 onAddPerson={() => setIsAddPersonOpen(true)}
                 onSelectPerson={(p) => setSelectedPerson(p)}
               />
-            )}
+            </View>
 
-            {currentMode === 'financial_overview' && (
+            <View style={[styles.screenTab, currentMode === 'financial_overview' ? styles.screenTabActive : styles.screenTabInactive]}>
               <OverviewScreen
                 onOpenTransfer={() => setIsTransferOpen(true)}
                 onAddAccount={() => setIsAddAccountOpen(true)}
               />
-            )}
+            </View>
           </View>
 
           {/* Mobile Bottom Navigation (Only on mobile width < 768px) */}
@@ -261,11 +268,20 @@ const AuthenticatedApp: React.FC = () => {
   const { user, isLoading, isGuestMode } = useAuth();
   const { isLocked, isInitialized } = useSecurity();
 
-  if (isLoading || !isInitialized) {
+  // Maximum startup grace timer: never display a loading screen longer than 800ms
+  const [maxLoadingElapsed, setMaxLoadingElapsed] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setMaxLoadingElapsed(true), 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const showLoader = (isLoading || !isInitialized) && !maxLoadingElapsed;
+
+  if (showLoader) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.brand[600]} />
-        <Text style={styles.loadingText}>Verifying secure session...</Text>
+        <Text style={styles.loadingText}>Opening MY WALLET...</Text>
       </View>
     );
   }
@@ -317,6 +333,15 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     backgroundColor: colors.slate[50],
+  },
+  screenTab: {
+    flex: 1,
+  },
+  screenTabActive: {
+    display: 'flex',
+  },
+  screenTabInactive: {
+    display: 'none',
   },
   loadingContainer: {
     flex: 1,

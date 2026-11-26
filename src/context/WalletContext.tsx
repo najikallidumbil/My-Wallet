@@ -700,71 +700,100 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [user, isHydrated]);
 
-  // Persist State to Storage (Only after hydration)
+  // Persist State to Storage (Debounced to keep the UI smooth & prevent disk I/O stutter)
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [transactions, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.CREDIT_DEBT, JSON.stringify(creditDebtRecords));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.CREDIT_DEBT, JSON.stringify(creditDebtRecords)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [creditDebtRecords, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [categories, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(budgets));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(budgets)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [budgets, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [accounts, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.TRANSFERS, JSON.stringify(accountTransfers));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.TRANSFERS, JSON.stringify(accountTransfers)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [accountTransfers, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.PEOPLE, JSON.stringify(people));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.PEOPLE, JSON.stringify(people)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [people, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.RECURRING, JSON.stringify(recurringTransactions));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.RECURRING, JSON.stringify(recurringTransactions)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [recurringTransactions, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    storage.setItem(STORAGE_KEYS.REMINDER_PREFS, JSON.stringify(reminderPreferences));
+    const timer = setTimeout(() => {
+      storage.setItem(STORAGE_KEYS.REMINDER_PREFS, JSON.stringify(reminderPreferences)).catch(console.warn);
+    }, 150);
+    return () => clearTimeout(timer);
   }, [reminderPreferences, isHydrated]);
 
-  // Persist Authenticated User Offline Cache
+  // Persist Authenticated User Offline Cache (Debounced 250ms)
   useEffect(() => {
     if (!isHydrated || !user?.id) return;
     const cacheKey = `my_wallet_offline_cache_${user.id}`;
-    // Only persist if we have valid initialized state to avoid overwriting cache on initial frame
-    storage.setItem(
-      cacheKey,
-      JSON.stringify({
-        transactions,
-        creditDebtRecords,
-        people,
-        accounts,
-        budgets,
-        accountTransfers,
-        categories,
-        messageHistory,
-        openingBalance,
-      })
-    );
+    const timer = setTimeout(() => {
+      storage.setItem(
+        cacheKey,
+        JSON.stringify({
+          transactions,
+          creditDebtRecords,
+          people,
+          accounts,
+          budgets,
+          accountTransfers,
+          categories,
+          messageHistory,
+          openingBalance,
+        })
+      ).catch(console.warn);
+    }, 250);
+    return () => clearTimeout(timer);
   }, [
     isHydrated,
     user?.id,
