@@ -1178,7 +1178,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </Text>
               <TextInput
                 style={styles.modalTextInput}
-                placeholder="e.g. +91 98765 43210"
+                placeholder="Enter 10-digit mobile number"
                 placeholderTextColor={colors.slate[400]}
                 value={mobileInputValue}
                 onChangeText={setMobileInputValue}
