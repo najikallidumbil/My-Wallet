@@ -20,16 +20,20 @@ import {
   Check,
   User,
   Phone,
-  Sparkles,
-  UserPlus,
+  BookUser,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
-import { Attachment, Person } from '../../types';
+import { Attachment } from '../../types';
 import { useResponsive } from '../../lib/useResponsive';
-import { AddPersonModal } from './AddPersonModal';
+import { PhoneSelectorModal } from './PhoneSelectorModal';
+import {
+  pickContactFromDevice,
+  openDeviceSettings,
+  ContactPhoneNumber,
+} from '../../lib/contactPicker';
 import { DateTimePickerField } from './DateTimePickerField';
 import { DatePickerField } from './DatePickerField';
 import { CategorySelector } from './CategorySelector';
@@ -72,7 +76,10 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [isAddPersonModalOpen, setIsAddPersonModalOpen] = useState(false);
+  const [isImportingContact, setIsImportingContact] = useState(false);
+  const [isPhoneModalVisible, setIsPhoneModalVisible] = useState(false);
+  const [pendingContactPhones, setPendingContactPhones] = useState<ContactPhoneNumber[]>([]);
+  const [pendingContactName, setPendingContactName] = useState('');
 
   const getNowLocal = () => {
     const n = new Date();
@@ -98,7 +105,18 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       setAmount('');
       setPersonName(initialPersonName);
       setPersonPhone(initialPersonPhone);
-      setSelectedPersonId(null);
+      if (initialPersonName) {
+        const match = people.find(
+          (p) => p.name.trim().toLowerCase() === initialPersonName.trim().toLowerCase()
+        );
+        setSelectedPersonId(match ? match.id : null);
+      } else {
+        setSelectedPersonId(null);
+      }
+      setIsImportingContact(false);
+      setIsPhoneModalVisible(false);
+      setPendingContactPhones([]);
+      setPendingContactName('');
       setCategoryId('');
       setSubcategoryId(undefined);
       setSubcategoryName(undefined);
@@ -109,7 +127,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       setDate(current.date);
       setTime(current.time);
     }
-  }, [visible, initialMode, initialPersonName, initialPersonPhone]);
+  }, [visible, initialMode, initialPersonName, initialPersonPhone, people]);
 
   // Filter categories by transaction type
   const availableCategories = useMemo(() => {
@@ -118,19 +136,59 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     );
   }, [categories, mode]);
 
-  // Filter people suggestions for searchable suggestions
-  const personSuggestions = useMemo(() => {
-    if (!personName.trim()) return [];
-    const q = personName.trim().toLowerCase();
-    return people
-      .filter((p) => p.name.toLowerCase().includes(q) || (p.phone && p.phone.includes(q)))
-      .slice(0, 4);
-  }, [people, personName]);
+  const handlePickContact = async () => {
+    try {
+      setIsImportingContact(true);
+      const res = await pickContactFromDevice();
+      if (res.success && res.contact) {
+        const { name: importedName, phone: importedPhone, phones } = res.contact;
+        setPersonName(importedName);
 
-  const handleSelectPerson = (p: Person) => {
-    setPersonName(p.name);
-    setPersonPhone(p.phone || '');
-    setSelectedPersonId(p.id);
+        // Check if imported contact matches an existing person in Khata records
+        const matched = people.find(
+          (p) => p.name.trim().toLowerCase() === importedName.trim().toLowerCase()
+        );
+        if (matched) {
+          setSelectedPersonId(matched.id);
+        } else {
+          setSelectedPersonId(null);
+        }
+
+        if (phones && phones.length > 1) {
+          // Multiple numbers: ask user to select their preferred number
+          setPendingContactName(importedName);
+          setPendingContactPhones(phones);
+          setIsPhoneModalVisible(true);
+        } else if (importedPhone) {
+          setPersonPhone(importedPhone);
+        } else {
+          setPersonPhone('');
+        }
+      } else if (res.permissionDenied) {
+        if (res.canOpenSettings) {
+          Alert.alert(
+            'Contacts Permission Required',
+            'MY WALLET needs permission to access your device contacts so you can quickly add people to your Khata Book.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => openDeviceSettings() },
+            ]
+          );
+        } else {
+          Alert.alert(
+            'Permission Denied',
+            'Contacts permission was denied. You can enter the name and phone number manually, or enable permission in Settings.'
+          );
+        }
+      } else if (!res.cancelled && res.error) {
+        Alert.alert('Contacts Notice', res.error);
+      }
+    } catch (err) {
+      console.warn('Contact picker error:', err);
+      Alert.alert('Contacts Error', 'Could not access device contacts.');
+    } finally {
+      setIsImportingContact(false);
+    }
   };
 
   const handlePersonNameChange = (text: string) => {
@@ -457,6 +515,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
             {/* Dynamic Field 1: Title (Income/Expense) or Person Details (Credit/Debt) */}
             {mode === 'credit' || mode === 'debt' ? (
               <>
+                {/* 1. Person Name Field with Integrated Contacts Icon */}
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
                     {mode === 'credit'
@@ -464,106 +523,46 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                       : 'PERSON NAME (WHO LENT YOU MONEY?) *'}
                   </Text>
 
-                  {/* Unified Add Person Trigger */}
-                  <View style={styles.personActionRow}>
-                    <TouchableOpacity
-                      style={styles.personActionBtn}
-                      onPress={() => setIsAddPersonModalOpen(true)}
-                      activeOpacity={0.7}
-                    >
-                      <UserPlus size={14} color={colors.brand[700]} />
-                      <Text style={styles.personActionBtnText}>+ Add Person</Text>
-                    </TouchableOpacity>
-                  </View>
-
                   <View style={styles.personInputContainer}>
-                    <User size={16} color={colors.slate[400]} style={styles.inputLeftIcon} />
+                    <User size={18} color={colors.slate[400]} style={styles.inputLeftIcon} />
                     <TextInput
                       style={styles.textInputWithIcon}
-                      placeholder="Type person's name..."
+                      placeholder="Enter person's name"
                       placeholderTextColor={colors.slate[400]}
                       value={personName}
                       onChangeText={handlePersonNameChange}
+                      autoCapitalize="words"
+                      returnKeyType="next"
                     />
-                    {selectedPersonId && (
+                    {selectedPersonId ? (
                       <View style={styles.linkedBadge}>
-                        <Check size={12} color={colors.income.text} />
+                        <Check size={11} color={colors.income.text} />
                         <Text style={styles.linkedBadgeText}>Saved</Text>
                       </View>
-                    )}
+                    ) : null}
+                    <TouchableOpacity
+                      style={styles.contactPickerBtn}
+                      onPress={handlePickContact}
+                      disabled={isImportingContact}
+                      activeOpacity={0.7}
+                      accessibilityLabel="Import from Contacts"
+                    >
+                      {isImportingContact ? (
+                        <ActivityIndicator size="small" color={colors.brand[600]} />
+                      ) : (
+                        <BookUser size={18} color={colors.brand[600]} />
+                      )}
+                    </TouchableOpacity>
                   </View>
-
-                  {/* Searchable suggestions dropdown as user types */}
-                  {personSuggestions.length > 0 && !selectedPersonId && (
-                    <View style={styles.suggestionsBox}>
-                      <Text style={styles.suggestionTitle}>Matching Contacts:</Text>
-                      {personSuggestions.map((p) => (
-                        <TouchableOpacity
-                          key={p.id}
-                          style={styles.suggestionItem}
-                          onPress={() => handleSelectPerson(p)}
-                        >
-                          <View style={styles.suggestionAvatar}>
-                            <Text style={styles.suggestionAvatarText}>
-                              {p.name.slice(0, 1).toUpperCase()}
-                            </Text>
-                          </View>
-                          <View style={styles.suggestionInfo}>
-                            <Text style={styles.suggestionName}>{p.name}</Text>
-                            {p.phone ? (
-                              <Text style={styles.suggestionPhone}>{p.phone}</Text>
-                            ) : null}
-                          </View>
-                          <Sparkles size={14} color={colors.brand[600]} />
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Quick selection pills for existing people */}
-                  {people.length > 0 && (
-                    <View style={styles.quickPeopleSection}>
-                      <Text style={styles.quickPeopleLabel}>Quick Select:</Text>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.personPills}
-                      >
-                        {people.map((p) => (
-                          <TouchableOpacity
-                            key={p.id}
-                            style={[
-                              styles.personPill,
-                              (selectedPersonId === p.id ||
-                                personName.trim().toLowerCase() === p.name.trim().toLowerCase()) &&
-                                styles.personPillActive,
-                            ]}
-                            onPress={() => handleSelectPerson(p)}
-                          >
-                            <Text
-                              style={[
-                                styles.personPillText,
-                                (selectedPersonId === p.id ||
-                                  personName.trim().toLowerCase() === p.name.trim().toLowerCase()) &&
-                                  styles.personPillTextActive,
-                              ]}
-                            >
-                              {p.name}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
                 </View>
 
-                {/* Optional Phone Number */}
+                {/* 2. Phone Number Field Directly Below Person Name */}
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
                     PHONE NUMBER (FOR WHATSAPP / SMS REMINDERS)
                   </Text>
                   <View style={styles.personInputContainer}>
-                    <Phone size={16} color={colors.slate[400]} style={styles.inputLeftIcon} />
+                    <Phone size={18} color={colors.slate[400]} style={styles.inputLeftIcon} />
                     <TextInput
                       style={styles.textInputWithIcon}
                       placeholder="10-digit mobile number (optional)"
@@ -572,6 +571,15 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                       value={personPhone}
                       onChangeText={setPersonPhone}
                     />
+                    {personPhone ? (
+                      <TouchableOpacity
+                        onPress={() => setPersonPhone('')}
+                        style={styles.clearPhoneBtn}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <X size={14} color={colors.slate[400]} />
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 </View>
 
@@ -775,12 +783,15 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         </View>
       </View>
 
-      <AddPersonModal
-        visible={isAddPersonModalOpen}
-        onClose={() => setIsAddPersonModalOpen(false)}
-        onPersonAdded={(p) => {
-          handleSelectPerson(p);
+      <PhoneSelectorModal
+        visible={isPhoneModalVisible}
+        contactName={pendingContactName}
+        phones={pendingContactPhones}
+        onSelectPhone={(num) => {
+          setPersonPhone(num);
+          setIsPhoneModalVisible(false);
         }}
+        onClose={() => setIsPhoneModalVisible(false)}
       />
     </Modal>
   );
@@ -909,154 +920,57 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.slate[900],
   },
-  personActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  personActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brand[50],
-    borderWidth: 1,
-    borderColor: colors.brand[200],
-    borderRadius: 10,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    gap: 6,
-  },
-  personActionBtnSecondary: {
-    backgroundColor: colors.slate[100],
-    borderColor: colors.slate[300],
-  },
-  personActionBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.brand[800],
-  },
-  personActionBtnTextDark: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.slate[800],
-  },
   personInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.slate[50],
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.slate[200],
     borderRadius: 14,
     paddingHorizontal: 12,
+    height: 48,
   },
   inputLeftIcon: {
-    marginRight: 8,
+    marginRight: 10,
   },
   textInputWithIcon: {
     flex: 1,
-    paddingVertical: 10,
+    height: '100%',
+    paddingVertical: 0,
     fontSize: 13,
     color: colors.slate[900],
+  },
+  contactPickerBtn: {
+    padding: 6,
+    marginLeft: 6,
+    borderRadius: 8,
+    backgroundColor: colors.brand[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.brand[100],
+  },
+  clearPhoneBtn: {
+    padding: 6,
+    marginLeft: 4,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   linkedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
     backgroundColor: colors.income.bg,
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: 6,
+    marginRight: 2,
   },
   linkedBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: colors.income.text,
-  },
-  suggestionsBox: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.brand[200],
-    borderRadius: 12,
-    marginTop: 6,
-    padding: 8,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  suggestionTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: colors.slate[400],
-    textTransform: 'uppercase',
-    marginBottom: 6,
-    paddingHorizontal: 4,
-  },
-  suggestionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 6,
-    borderRadius: 8,
-    gap: 8,
-  },
-  suggestionAvatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.brand[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  suggestionAvatarText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: colors.brand[700],
-  },
-  suggestionInfo: {
-    flex: 1,
-  },
-  suggestionName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.slate[800],
-  },
-  suggestionPhone: {
-    fontSize: 10,
-    color: colors.slate[400],
-  },
-  quickPeopleSection: {
-    marginTop: 8,
-  },
-  quickPeopleLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.slate[400],
-    marginBottom: 4,
-  },
-  personPills: {
-    flexDirection: 'row',
-  },
-  personPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: colors.slate[100],
-    marginRight: 8,
-  },
-  personPillActive: {
-    backgroundColor: colors.brand[600],
-  },
-  personPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.slate[700],
-  },
-  personPillTextActive: {
-    color: colors.white,
   },
   notesInput: {
     height: 60,
