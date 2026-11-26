@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -47,8 +47,6 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
   const { isNarrowMobile, isTablet, isDesktop } = useResponsive();
   const isWide = isTablet || isDesktop;
 
-  if (!personSummary) return null;
-
   const {
     creditDebtRecords,
     settleCreditDebt,
@@ -66,21 +64,36 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
 
   // Edit Person State
   const [isEditingPerson, setIsEditingPerson] = useState(false);
-  const [editName, setEditName] = useState(personSummary.name);
-  const [editPhone, setEditPhone] = useState(personSummary.phone || '');
+  const [editName, setEditName] = useState(personSummary?.name || '');
+  const [editPhone, setEditPhone] = useState(personSummary?.phone || '');
 
   // Smart Message Modal State
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [messageInitialType, setMessageInitialType] = useState<MessageType>('payment_reminder');
   const [selectedRecordForMessage, setSelectedRecordForMessage] = useState<CreditDebtRecord | null>(null);
 
+  // Synchronize edit fields and filters when person changes
+  useEffect(() => {
+    if (personSummary) {
+      setEditName(personSummary.name || '');
+      setEditPhone(personSummary.phone || '');
+      setIsEditingPerson(false);
+      setSettlingRecordId(null);
+      setSettleAmount('');
+      setSettleNotes('');
+      setHistoryFilter('all');
+    }
+  }, [personSummary?.id, personSummary?.name, personSummary?.phone]);
+
   // Get all credit/debt records for this person
   const personRecords = useMemo(() => {
+    if (!personSummary) return [];
+    const targetName = personSummary.name?.trim().toLowerCase();
     return creditDebtRecords
       .filter(
         (r) =>
           r.personId === personSummary.id ||
-          r.counterpartName?.trim().toLowerCase() === personSummary.name.trim().toLowerCase()
+          (targetName && r.counterpartName?.trim().toLowerCase() === targetName)
       )
       .sort((a, b) => {
         const dateA = a.transactionDate || (a.createdAt ? a.createdAt.slice(0, 10) : '');
@@ -91,6 +104,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
 
   // Filtered Ledger Entries
   const filteredRecords = useMemo(() => {
+    if (!personSummary) return [];
     const now = new Date();
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const lastMonthD = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -114,10 +128,12 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
       }
       return true;
     });
-  }, [personRecords, historyFilter]);
+  }, [personRecords, historyFilter, personSummary]);
 
-  const isRec = personSummary.netBalance > 0;
-  const isPay = personSummary.netBalance < 0;
+  if (!visible || !personSummary) return null;
+
+  const isRec = (personSummary.netBalance || 0) > 0;
+  const isPay = (personSummary.netBalance || 0) < 0;
 
   // Save edited person info
   const handleSavePersonEdit = async () => {
@@ -223,13 +239,13 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
             <View style={styles.personHeader}>
               <View style={styles.avatarBox}>
                 <Text style={styles.avatarText}>
-                  {personSummary.name.slice(0, 2).toUpperCase()}
+                  {personSummary.name ? personSummary.name.slice(0, 2).toUpperCase() : '??'}
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
                 <View style={styles.nameRow}>
                   <Text style={styles.personName} numberOfLines={1}>
-                    {personSummary.name}
+                    {personSummary.name || 'Unknown Contact'}
                   </Text>
                   {personSummary.paymentStatus === 'overdue' && (
                     <View style={styles.overdueBadge}>
@@ -309,7 +325,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                   isRec ? styles.textRec : isPay ? styles.textPay : styles.textSettled,
                 ]}
               >
-                {formatRupees(Math.abs(personSummary.netBalance))}
+                {formatRupees(Math.abs(personSummary.netBalance || 0))}
               </Text>
 
               {/* Complete 6 Financial Metric Breakdown */}
@@ -319,18 +335,18 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                   <Text style={styles.colTitle}>MONEY LENT (CREDIT)</Text>
                   <View style={styles.metricRow}>
                     <Text style={styles.metricLabel}>Total Lent:</Text>
-                    <Text style={styles.metricVal}>{formatRupees(personSummary.totalGiven)}</Text>
+                    <Text style={styles.metricVal}>{formatRupees(personSummary.totalGiven || 0)}</Text>
                   </View>
                   <View style={styles.metricRow}>
                     <Text style={styles.metricLabel}>Received Back:</Text>
                     <Text style={[styles.metricVal, { color: colors.income.text }]}>
-                      {formatRupees(personSummary.totalReceivedBack)}
+                      {formatRupees(personSummary.totalReceivedBack || 0)}
                     </Text>
                   </View>
                   <View style={[styles.metricRow, styles.metricHighlightRow]}>
                     <Text style={styles.metricLabelBold}>To Receive:</Text>
                     <Text style={[styles.metricValBold, { color: colors.receivable.text }]}>
-                      {formatRupees(personSummary.outstandingReceivable)}
+                      {formatRupees(personSummary.outstandingReceivable || 0)}
                     </Text>
                   </View>
                 </View>
@@ -340,18 +356,18 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                   <Text style={styles.colTitle}>MONEY BORROWED (DEBT)</Text>
                   <View style={styles.metricRow}>
                     <Text style={styles.metricLabel}>Total Borrowed:</Text>
-                    <Text style={styles.metricVal}>{formatRupees(personSummary.totalBorrowed)}</Text>
+                    <Text style={styles.metricVal}>{formatRupees(personSummary.totalBorrowed || 0)}</Text>
                   </View>
                   <View style={styles.metricRow}>
                     <Text style={styles.metricLabel}>Repaid by You:</Text>
                     <Text style={[styles.metricVal, { color: colors.income.text }]}>
-                      {formatRupees(personSummary.totalRepaid)}
+                      {formatRupees(personSummary.totalRepaid || 0)}
                     </Text>
                   </View>
                   <View style={[styles.metricRow, styles.metricHighlightRow]}>
                     <Text style={styles.metricLabelBold}>To Pay:</Text>
                     <Text style={[styles.metricValBold, { color: colors.payable.text }]}>
-                      {formatRupees(personSummary.outstandingPayable)}
+                      {formatRupees(personSummary.outstandingPayable || 0)}
                     </Text>
                   </View>
                 </View>

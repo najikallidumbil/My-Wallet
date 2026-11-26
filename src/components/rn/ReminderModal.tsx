@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -26,18 +26,25 @@ export const ReminderModal: React.FC<ReminderModalProps> = ({
   record,
   onClose,
 }) => {
-  if (!record) return null;
+  const [customMsg, setCustomMsg] = useState('');
+
+  useEffect(() => {
+    if (record) {
+      const isCredit = record.type === 'credit';
+      const amountStr = formatRupees(record.remainingAmount);
+      const msg = isCredit
+        ? `Hi ${record.counterpartName}, this is a friendly reminder regarding the outstanding balance of ${amountStr}${
+            record.dueDate ? ` due on ${formatDate(record.dueDate)}` : ''
+          }. Please arrange payment when convenient. Thank you!`
+        : `Hi ${record.counterpartName}, updating you regarding the pending amount of ${amountStr}. Please let me know your preferred repayment method. Thank you!`;
+      setCustomMsg(msg);
+    }
+  }, [record]);
+
+  if (!visible || !record) return null;
 
   const isCredit = record.type === 'credit';
   const amountStr = formatRupees(record.remainingAmount);
-
-  const defaultMsg = isCredit
-    ? `Hi ${record.counterpartName}, this is a friendly reminder regarding the outstanding balance of ${amountStr}${
-        record.dueDate ? ` due on ${formatDate(record.dueDate)}` : ''
-      }. Please arrange payment when convenient. Thank you!`
-    : `Hi ${record.counterpartName}, updating you regarding the pending amount of ${amountStr}. Please let me know your preferred repayment method. Thank you!`;
-
-  const [customMsg, setCustomMsg] = useState(defaultMsg);
 
   const handleSendWhatsApp = () => {
     if (!record.counterpartPhone) {

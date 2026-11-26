@@ -197,32 +197,34 @@ const MainScreen: React.FC = () => {
         onClose={() => setIsKhataSettleOpen(false)}
       />
 
-      <ReminderModal
-        visible={!!reminderModalRecord}
-        record={reminderModalRecord}
-        onClose={closeReminderModal}
-      />
+      {reminderModalRecord && (
+        <ReminderModal
+          visible={!!reminderModalRecord}
+          record={reminderModalRecord}
+          onClose={closeReminderModal}
+        />
+      )}
 
-      <PersonLedgerModal
-        visible={!!selectedPerson}
-        personSummary={
-          selectedPerson
-            ? personSummaries.find((p) => p.id === selectedPerson.id) || selectedPerson
-            : null
-        }
-        onClose={() => setSelectedPerson(null)}
-        onOpenQuickAdd={(mode, name, phone) =>
-          handleOpenQuickAdd(
-            mode,
-            name || selectedPerson?.name || '',
-            phone || selectedPerson?.phone || ''
-          )
-        }
-        onOpenSettleModal={(mode) => {
-          setKhataSettleMode(mode);
-          setIsKhataSettleOpen(true);
-        }}
-      />
+      {selectedPerson && (
+        <PersonLedgerModal
+          visible={!!selectedPerson}
+          personSummary={
+            personSummaries.find((p) => p.id === selectedPerson.id) || selectedPerson
+          }
+          onClose={() => setSelectedPerson(null)}
+          onOpenQuickAdd={(mode, name, phone) =>
+            handleOpenQuickAdd(
+              mode,
+              name || selectedPerson?.name || '',
+              phone || selectedPerson?.phone || ''
+            )
+          }
+          onOpenSettleModal={(mode) => {
+            setKhataSettleMode(mode);
+            setIsKhataSettleOpen(true);
+          }}
+        />
+      )}
 
       <TransferModal
         visible={isTransferOpen}
@@ -244,11 +246,13 @@ const MainScreen: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
       />
 
-      <TransactionDetailsModal
-        visible={!!selectedTx}
-        transaction={selectedTx}
-        onClose={() => setSelectedTx(null)}
-      />
+      {selectedTx && (
+        <TransactionDetailsModal
+          visible={!!selectedTx}
+          transaction={selectedTx}
+          onClose={() => setSelectedTx(null)}
+        />
+      )}
     </SafeAreaView>
   );
 };

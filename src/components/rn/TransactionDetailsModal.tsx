@@ -35,9 +35,9 @@ export const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = (
   transaction,
   onClose,
 }) => {
-  if (!transaction) return null;
-
   const { categories, accounts, deleteTransaction } = useWallet();
+
+  if (!visible || !transaction) return null;
 
   const isInc = transaction.type === 'income';
   const cat = categories.find((c) => c.id === transaction.categoryId);
