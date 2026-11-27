@@ -21,6 +21,7 @@ import {
   Edit3,
   ChevronLeft,
   ChevronRight,
+  Download,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
@@ -33,6 +34,7 @@ import { useResponsive } from '../../lib/useResponsive';
 import { IncomeExpenseBarChart } from '../../components/rn/charts/IncomeExpenseBarChart';
 import { CashFlowLineChart } from '../../components/rn/charts/CashFlowLineChart';
 import { BudgetModal } from '../../components/rn/BudgetModal';
+import { PdfReportModal } from '../../components/rn/reports/PdfReportModal';
 
 interface FinanceScreenProps {
   onAddIncome: () => void;
@@ -59,6 +61,7 @@ export const FinanceScreen: React.FC<FinanceScreenProps> = ({
   const isWide = isTablet || isDesktop;
 
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -343,15 +346,25 @@ export const FinanceScreen: React.FC<FinanceScreenProps> = ({
 
         {/* 6. Filter & Search Bar */}
         <View style={styles.filterSection}>
-          <View style={styles.searchBox}>
-            <Search size={16} color={colors.slate[400]} />
-            <TextInput
-              placeholder="Search transactions..."
-              placeholderTextColor={colors.slate[400]}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              style={styles.searchInput}
-            />
+          <View style={styles.searchRow}>
+            <View style={styles.searchBox}>
+              <Search size={16} color={colors.slate[400]} />
+              <TextInput
+                placeholder="Search transactions..."
+                placeholderTextColor={colors.slate[400]}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                style={styles.searchInput}
+              />
+            </View>
+            <TouchableOpacity
+              style={styles.pdfExportBtn}
+              onPress={() => setIsPdfModalOpen(true)}
+              activeOpacity={0.8}
+            >
+              <Download size={14} color={colors.white} strokeWidth={2.4} />
+              <Text style={styles.pdfExportText}>PDF</Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.filterTabs}>
@@ -483,6 +496,12 @@ export const FinanceScreen: React.FC<FinanceScreenProps> = ({
         onClose={() => setIsBudgetModalOpen(false)}
         initialMonth={selectedBudgetMonth}
       />
+
+      <PdfReportModal
+        visible={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        initialReportType="complete"
+      />
     </ScrollView>
   );
 };
@@ -524,6 +543,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   balanceLabel: {
     fontSize: 12,
@@ -755,6 +776,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   budgetTitle: {
     fontSize: 13,
@@ -807,7 +830,32 @@ const styles = StyleSheet.create({
   filterSection: {
     gap: 10,
   },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pdfExportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.brand[600],
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: 14,
+    shadowColor: colors.brand[600],
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  pdfExportText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.white,
+  },
   searchBox: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.white,

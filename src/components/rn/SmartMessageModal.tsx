@@ -252,7 +252,7 @@ export const SmartMessageModal: React.FC<SmartMessageModalProps> = ({
                   {person.name.slice(0, 2).toUpperCase()}
                 </Text>
               </View>
-              <View>
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.title} numberOfLines={1}>
                   Smart Reminder: {person.name}
                 </Text>
@@ -490,6 +490,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
   },
   avatarBox: {
     width: 40,
@@ -498,6 +500,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand[50],
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   avatarText: {
     fontSize: 14,
@@ -519,6 +522,7 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 8,
     backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   bodyScroll: {
     flexGrow: 0,

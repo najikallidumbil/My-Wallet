@@ -136,13 +136,13 @@ export const BudgetModal: React.FC<BudgetModalProps> = ({
               <View style={styles.iconCircle}>
                 <Target size={20} color={colors.white} />
               </View>
-              <View>
-                <Text style={styles.title}>Monthly Budget</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.title} numberOfLines={1}>Monthly Budget</Text>
                 <Text style={styles.subtitle}>Set your personal expense cap</Text>
               </View>
             </View>
 
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
               <X size={20} color={colors.slate[600]} />
             </TouchableOpacity>
           </View>
@@ -302,6 +302,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
   },
   iconCircle: {
     width: 38,
@@ -310,6 +313,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand[600],
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   title: {
     fontSize: 17,
@@ -323,6 +327,9 @@ const styles = StyleSheet.create({
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   body: {
     gap: 14,

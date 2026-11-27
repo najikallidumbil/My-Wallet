@@ -60,7 +60,8 @@
           "contactsPermission": "Allow MY WALLET to access your contacts to import people into Khata Book."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-sharing"
     ],
     "extra": {
       "eas": {

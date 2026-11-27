@@ -75,13 +75,13 @@ export const TypeSelectorModal: React.FC<TypeSelectorModalProps> = ({
       <View style={styles.backdrop}>
         <View style={styles.modalCard}>
           <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>Select Transaction Type</Text>
+            <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+              <Text style={styles.title} numberOfLines={1}>Select Transaction Type</Text>
               <Text style={styles.subtitle}>
                 Choose what kind of entry you want to record
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
               <X size={20} color={colors.slate[600]} />
             </TouchableOpacity>
           </View>
@@ -152,6 +152,9 @@ const styles = StyleSheet.create({
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   optionsList: {
     gap: 12,

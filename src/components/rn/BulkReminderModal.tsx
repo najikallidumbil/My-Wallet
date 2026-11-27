@@ -292,8 +292,8 @@ export const BulkReminderModal: React.FC<BulkReminderModalProps> = ({
         >
           {/* Header */}
           <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>
+            <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+              <Text style={styles.title} numberOfLines={1}>
                 {workflowActive ? 'Sending Reminders' : 'Bulk Payment Reminders'}
               </Text>
               <Text style={styles.subtitle}>
@@ -646,6 +646,7 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 8,
     backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   bodyScroll: {
     flexGrow: 0,

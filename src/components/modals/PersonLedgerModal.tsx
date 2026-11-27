@@ -298,7 +298,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                 className="px-3 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1 active:scale-95 transition-all"
               >
                 <ArrowUpRight className="w-3.5 h-3.5" />
-                <span>Give Money</span>
+                <span>Give Money (Lend)</span>
               </button>
 
               <button
@@ -306,7 +306,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                 className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1 active:scale-95 transition-all"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>Receive Money</span>
+                <span>Record Payment Received</span>
               </button>
 
               <button
@@ -322,7 +322,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                 className="px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1 active:scale-95 transition-all"
               >
                 <History className="w-3.5 h-3.5" />
-                <span>Repay Money</span>
+                <span>Record Repayment</span>
               </button>
             </div>
           </div>

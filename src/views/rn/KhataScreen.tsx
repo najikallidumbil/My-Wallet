@@ -24,6 +24,7 @@ import {
   Archive,
   Check,
   ArrowRight,
+  Download,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
@@ -40,6 +41,7 @@ import { KhataDashboardCharts } from '../../components/rn/charts/KhataDashboardC
 import { SmartMessageModal } from '../../components/rn/SmartMessageModal';
 import { BulkReminderModal } from '../../components/rn/BulkReminderModal';
 import { MessageHistoryModal } from '../../components/rn/MessageHistoryModal';
+import { PdfReportModal } from '../../components/rn/reports/PdfReportModal';
 
 interface KhataScreenProps {
   onLendMoney: () => void;
@@ -79,6 +81,7 @@ export const KhataScreen: React.FC<KhataScreenProps> = ({
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [selectedPersonForMessage, setSelectedPersonForMessage] = useState<PersonSummary | null>(null);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
 
   const {
     totalReceivable,
@@ -201,80 +204,7 @@ export const KhataScreen: React.FC<KhataScreenProps> = ({
       ]}
     >
       <View style={isWide ? styles.innerWide : styles.inner}>
-        {/* 1. Quick Action Strip (Give, Receive, Borrow, Repay + Person & Bulk) */}
-        <View style={styles.actionGrid}>
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.lendBtn]}
-              onPress={onLendMoney}
-              activeOpacity={0.8}
-            >
-              <ArrowUpRight size={16} color={colors.white} />
-              <Text style={styles.actionBtnText}>Give (Lend)</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.receiveBtn]}
-              onPress={onReceiveMoney}
-              activeOpacity={0.8}
-            >
-              <ArrowDownLeft size={16} color={colors.white} />
-              <Text style={styles.actionBtnText}>Receive Money</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.borrowBtn]}
-              onPress={onBorrowMoney}
-              activeOpacity={0.8}
-            >
-              <ArrowDownLeft size={16} color={colors.white} />
-              <Text style={styles.actionBtnText}>Borrow</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.repayBtn]}
-              onPress={onRepayMoney}
-              activeOpacity={0.8}
-            >
-              <ArrowUpRight size={16} color={colors.white} />
-              <Text style={styles.actionBtnText}>Repay Money</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Secondary Utilities Strip: Add Person, Bulk Reminders, Message History */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.utilBtn, styles.addPersonBtn]}
-              onPress={onAddPerson}
-              activeOpacity={0.8}
-            >
-              <UserPlus size={15} color={colors.brand[700]} />
-              <Text style={styles.addPersonBtnText}>+ Add Person</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.utilBtn, styles.bulkRemindBtn]}
-              onPress={() => setIsBulkModalOpen(true)}
-              activeOpacity={0.8}
-            >
-              <MessageCircle size={15} color="#15803d" />
-              <Text style={styles.bulkRemindBtnText}>Bulk Reminders</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.utilBtn, styles.historyBtn]}
-              onPress={() => setIsHistoryModalOpen(true)}
-              activeOpacity={0.8}
-            >
-              <History size={15} color={colors.slate[700]} />
-              <Text style={styles.historyBtnText}>History</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* 2. 4 Executive Summary Cards (Clean 2-col on Mobile, 4-col on Tablet/Desktop) */}
+        {/* 1. Executive Summary Cards (Top of Khata Dashboard - 2x2 Grid on Mobile) */}
         <View style={isWide ? styles.summaryGridWide : styles.summaryGridMobile}>
           {/* Card 1: Total Receivable */}
           <View style={isWide ? styles.summaryColWide : styles.summaryColMobile}>
@@ -350,6 +280,122 @@ export const KhataScreen: React.FC<KhataScreenProps> = ({
               />
             )}
           </View>
+        </View>
+
+        {/* 2. Primary Action Buttons (2-Column Grid Below Summary Cards) */}
+        <View style={styles.primaryActionGrid}>
+          {/* Row 1: Give (Lend) & Receive Money */}
+          <View style={styles.primaryActionRow}>
+            <TouchableOpacity
+              style={[styles.primaryActionBtn, styles.lendBtn]}
+              onPress={onLendMoney}
+              activeOpacity={0.85}
+            >
+              <View style={styles.primaryActionIconCircle}>
+                <ArrowUpRight size={17} color={colors.white} strokeWidth={2.5} />
+              </View>
+              <Text
+                style={styles.primaryActionBtnText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                Give (Lend)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryActionBtn, styles.receiveBtn]}
+              onPress={onReceiveMoney}
+              activeOpacity={0.85}
+            >
+              <View style={styles.primaryActionIconCircle}>
+                <ArrowDownLeft size={17} color={colors.white} strokeWidth={2.5} />
+              </View>
+              <Text
+                style={styles.primaryActionBtnText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                Receive Money
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Row 2: Borrow & Repay Money */}
+          <View style={styles.primaryActionRow}>
+            <TouchableOpacity
+              style={[styles.primaryActionBtn, styles.borrowBtn]}
+              onPress={onBorrowMoney}
+              activeOpacity={0.85}
+            >
+              <View style={styles.primaryActionIconCircle}>
+                <ArrowDownLeft size={17} color={colors.white} strokeWidth={2.5} />
+              </View>
+              <Text
+                style={styles.primaryActionBtnText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                Borrow
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryActionBtn, styles.repayBtn]}
+              onPress={onRepayMoney}
+              activeOpacity={0.85}
+            >
+              <View style={styles.primaryActionIconCircle}>
+                <ArrowUpRight size={17} color={colors.white} strokeWidth={2.5} />
+              </View>
+              <Text
+                style={styles.primaryActionBtnText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                Repay Money
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 3. Secondary Actions Strip */}
+        <View style={isWide ? styles.utilRowWide : styles.utilGridMobile}>
+          <TouchableOpacity
+            style={[styles.utilBtn, !isWide && styles.utilBtnMobile, styles.addPersonBtn]}
+            onPress={onAddPerson}
+            activeOpacity={0.8}
+          >
+            <UserPlus size={15} color={colors.brand[700]} />
+            <Text style={styles.addPersonBtnText} numberOfLines={1} adjustsFontSizeToFit>+ Add Person</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.utilBtn, !isWide && styles.utilBtnMobile, styles.bulkRemindBtn]}
+            onPress={() => setIsBulkModalOpen(true)}
+            activeOpacity={0.8}
+          >
+            <MessageCircle size={15} color="#15803d" />
+            <Text style={styles.bulkRemindBtnText} numberOfLines={1} adjustsFontSizeToFit>Bulk Reminders</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.utilBtn, !isWide && styles.utilBtnMobile, styles.historyBtn]}
+            onPress={() => setIsHistoryModalOpen(true)}
+            activeOpacity={0.8}
+          >
+            <History size={15} color={colors.slate[700]} />
+            <Text style={styles.historyBtnText} numberOfLines={1} adjustsFontSizeToFit>History</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.utilBtn, !isWide && styles.utilBtnMobile, styles.pdfBtn]}
+            onPress={() => setIsPdfModalOpen(true)}
+            activeOpacity={0.8}
+          >
+            <Download size={14} color="#0369a1" />
+            <Text style={styles.pdfBtnText} numberOfLines={1} adjustsFontSizeToFit>Khata PDF</Text>
+          </TouchableOpacity>
         </View>
 
         {/* 3. 4 Dynamic Financial Charts */}
@@ -689,6 +735,13 @@ export const KhataScreen: React.FC<KhataScreenProps> = ({
           visible={isHistoryModalOpen}
           onClose={() => setIsHistoryModalOpen(false)}
         />
+
+        {/* 9. Khata Book PDF Report Modal */}
+        <PdfReportModal
+          visible={isPdfModalOpen}
+          onClose={() => setIsPdfModalOpen(false)}
+          initialReportType="khata"
+        />
       </View>
     </ScrollView>
   );
@@ -716,6 +769,44 @@ const styles = StyleSheet.create({
   },
   actionGrid: {
     gap: 10,
+  },
+  primaryActionGrid: {
+    gap: 10,
+  },
+  primaryActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'stretch',
+  },
+  primaryActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    paddingVertical: 13,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  primaryActionIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryActionBtnText: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: -0.2,
   },
   actionRow: {
     flexDirection: 'row',
@@ -752,15 +843,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+  utilRowWide: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  utilGridMobile: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   utilBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
+    paddingHorizontal: 8,
     borderRadius: 12,
     borderWidth: 1,
     gap: 6,
+    minHeight: 42,
+  },
+  utilBtnMobile: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    minWidth: 140,
   },
   addPersonBtn: {
     backgroundColor: colors.brand[50],
@@ -789,27 +896,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
+  pdfBtn: {
+    backgroundColor: '#f0f9ff',
+    borderColor: '#bae6fd',
+  },
+  pdfBtnText: {
+    color: '#0369a1',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   summaryGridMobile: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
   },
   summaryColMobile: {
-    flexBasis: '48%',
+    flexBasis: '47%',
     flexGrow: 1,
-    maxWidth: '50%',
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
   },
   summaryGridWide: {
     flexDirection: 'row',
     gap: 12,
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
   },
   summaryColWide: {
     flex: 1,
     minWidth: 150,
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
   },
   noOverdueRow: {
     flexDirection: 'row',
@@ -1051,6 +1166,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
   },
   avatarBox: {
     width: 44,
@@ -1089,6 +1205,7 @@ const styles = StyleSheet.create({
   },
   personDetails: {
     flex: 1,
+    minWidth: 0,
   },
   nameHeaderRow: {
     flexDirection: 'row',
@@ -1100,6 +1217,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: colors.slate[900],
+    flexShrink: 1,
   },
   statusBadgeDanger: {
     flexDirection: 'row',
@@ -1162,6 +1280,7 @@ const styles = StyleSheet.create({
   personCardRight: {
     alignItems: 'flex-end',
     gap: 2,
+    flexShrink: 0,
   },
   personAmount: {
     fontSize: 15,

@@ -51,6 +51,7 @@ const MainScreen: React.FC = () => {
   const [isTypeSelectorOpen, setIsTypeSelectorOpen] = useState(false);
   const [isKhataSettleOpen, setIsKhataSettleOpen] = useState(false);
   const [khataSettleMode, setKhataSettleMode] = useState<'receive' | 'repay'>('receive');
+  const [khataSettlePersonId, setKhataSettlePersonId] = useState<string | undefined>(undefined);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
@@ -141,11 +142,13 @@ const MainScreen: React.FC = () => {
                 onLendMoney={() => handleOpenQuickAdd('credit')}
                 onReceiveMoney={() => {
                   setKhataSettleMode('receive');
+                  setKhataSettlePersonId(undefined);
                   setIsKhataSettleOpen(true);
                 }}
                 onBorrowMoney={() => handleOpenQuickAdd('debt')}
                 onRepayMoney={() => {
                   setKhataSettleMode('repay');
+                  setKhataSettlePersonId(undefined);
                   setIsKhataSettleOpen(true);
                 }}
                 onAddPerson={() => setIsAddPersonOpen(true)}
@@ -201,7 +204,11 @@ const MainScreen: React.FC = () => {
       <KhataSettleModal
         visible={isKhataSettleOpen}
         mode={khataSettleMode}
-        onClose={() => setIsKhataSettleOpen(false)}
+        initialPersonId={khataSettlePersonId}
+        onClose={() => {
+          setIsKhataSettleOpen(false);
+          setKhataSettlePersonId(undefined);
+        }}
       />
 
       {reminderModalRecord && (
@@ -226,8 +233,9 @@ const MainScreen: React.FC = () => {
               phone || selectedPerson?.phone || ''
             )
           }
-          onOpenSettleModal={(mode) => {
+          onOpenSettleModal={(mode, personId) => {
             setKhataSettleMode(mode);
+            setKhataSettlePersonId(personId || selectedPerson?.id);
             setIsKhataSettleOpen(true);
           }}
         />

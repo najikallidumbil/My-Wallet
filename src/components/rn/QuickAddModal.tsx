@@ -10,6 +10,8 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import {
   X,
@@ -431,8 +433,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={[styles.backdrop, isWide && styles.backdropWide]}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={[styles.backdrop, isWide && styles.backdropWide]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <View
           style={[
             styles.modalCard,
@@ -442,11 +447,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         >
           {/* Header */}
           <View style={styles.modalHeader}>
-            <View>
+            <View style={styles.modalTitleCol}>
               <Text style={styles.modalTitle}>{getModalTitle()}</Text>
               <Text style={styles.modalSubtitle}>{getModalSubtitle()}</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7} accessibilityLabel="Close">
               <X size={20} color={colors.slate[600]} />
             </TouchableOpacity>
           </View>
@@ -498,7 +503,12 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.formScroll} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.formScroll}
+            contentContainerStyle={styles.formScrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {/* Amount Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>AMOUNT (₹) *</Text>
@@ -781,7 +791,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
 
       <PhoneSelectorModal
         visible={isPhoneModalVisible}
@@ -839,6 +849,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
+  modalTitleCol: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
+  },
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
@@ -848,9 +863,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.slate[500],
     marginTop: 2,
+    lineHeight: 16,
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   modeTabs: {
     flexDirection: 'row',
@@ -888,6 +907,9 @@ const styles = StyleSheet.create({
   },
   formScroll: {
     maxHeight: 460,
+  },
+  formScrollContent: {
+    paddingBottom: 16,
   },
   inputGroup: {
     marginBottom: 14,

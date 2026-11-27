@@ -157,7 +157,7 @@ export const BalanceGrowthAreaChart: React.FC<BalanceGrowthAreaChartProps> = ({
     <View style={styles.card} onLayout={onLayout}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerTitleArea}>
           <View style={styles.titleRow}>
             <Text style={styles.title}>Growth & Wealth Trajectory</Text>
             <View
@@ -412,13 +412,20 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: 10,
+  },
+  headerTitleArea: {
+    flex: 1,
+    minWidth: 160,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   title: {
     fontSize: 15,
@@ -449,6 +456,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 2,
     gap: 2,
+    alignSelf: 'flex-start',
   },
   groupingPill: {
     paddingHorizontal: 8,
@@ -479,10 +487,13 @@ const styles = StyleSheet.create({
     padding: 3,
     marginBottom: 10,
     gap: 4,
+    flexWrap: 'wrap',
   },
   metricTab: {
     flex: 1,
+    minWidth: 130,
     paddingVertical: 6,
+    paddingHorizontal: 8,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',

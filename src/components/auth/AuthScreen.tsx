@@ -5,25 +5,23 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  Wallet,
   Mail,
-  KeyRound,
   ShieldCheck,
   ArrowRight,
   ArrowLeft,
   RotateCcw,
   AlertCircle,
-  Settings,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  HelpCircle,
+  Lock,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
@@ -32,23 +30,16 @@ import { useResponsive } from '../../lib/useResponsive';
 
 export const AuthScreen: React.FC = () => {
   const { isNarrowMobile } = useResponsive();
-  const {
-    connectionStatus,
-    connectionError,
-    latencyMs,
-    projectDomain,
-    sendOtp,
-    verifyOtp,
-    enableGuestMode,
-    checkConnection,
-  } = useAuth();
+  const { sendOtp, verifyOtp, enableGuestMode } = useAuth();
 
-  // Screen modes for OTP: 'email' | 'otp'
+  // Screen modes: 'email' | 'otp'
   const [step, setStep] = useState<'email' | 'otp'>('email');
 
   // Input states
   const [email, setEmail] = useState('');
+  const [isEmailFocused, setIsEmailFocused] = useState(false);
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
+  const [focusedOtpIndex, setFocusedOtpIndex] = useState<number | null>(null);
 
   // Status states
   const [isLoading, setIsLoading] = useState(false);
@@ -56,17 +47,20 @@ export const AuthScreen: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  // Configuration modal
+  // Hidden developer configuration mode (accessed via 5-tap gesture on brand icon)
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [logoTapCount, setLogoTapCount] = useState(0);
+  const lastTapRef = useRef<number>(0);
 
-  // Guide accordion
-  const [showSetupGuide, setShowSetupGuide] = useState(false);
-  const [showOtpHelp, setShowOtpHelp] = useState(false);
-
-  // References for 6 OTP input boxes
+  // TextInput references
+  const emailInputRef = useRef<any>(null);
   const inputRefs = useRef<Array<any>>([]);
 
-  // Countdown timer for resend OTP
+  // Validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const isEmailValid = emailRegex.test(email.trim());
+
+  // Countdown timer for Resend OTP
   useEffect(() => {
     let timer: any;
     if (resendCooldown > 0) {
@@ -77,13 +71,29 @@ export const AuthScreen: React.FC = () => {
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  // Handle Send OTP (Works for both new and existing users)
+  // Protected Developer Mode Gesture (5 rapid taps on logo)
+  const handleSecretDeveloperTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 900) {
+      const nextCount = logoTapCount + 1;
+      setLogoTapCount(nextCount);
+      if (nextCount >= 5) {
+        setLogoTapCount(0);
+        setIsConfigModalOpen(true);
+      }
+    } else {
+      setLogoTapCount(1);
+    }
+    lastTapRef.current = now;
+  };
+
+  // Handle Send OTP
   const handleSendOtp = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
     const trimmedEmail = email.trim().toLowerCase();
-    if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+    if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
       setErrorMessage('Please enter a valid email address.');
       return;
     }
@@ -94,16 +104,45 @@ export const AuthScreen: React.FC = () => {
 
     if (res.success) {
       setStep('otp');
-      setResendCooldown(60);
-      setSuccessMessage(`A 6-digit verification code was sent to ${trimmedEmail}`);
-      // Focus first input box
+      setResendCooldown(30);
+      setSuccessMessage(`We've sent a 6-digit verification code to ${trimmedEmail}`);
+      // Focus first OTP input box smoothly
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 250);
+    } else {
+      setErrorMessage(
+        res.error || 'Unable to send verification code. Please check your connection and try again.'
+      );
+    }
+  };
+
+  // Handle Resend OTP (with 30-second cooldown protection)
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || isLoading) return;
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+
+    setIsLoading(true);
+    const res = await sendOtp(trimmedEmail);
+    setIsLoading(false);
+
+    if (res.success) {
+      setResendCooldown(30);
+      setOtpDigits(['', '', '', '', '', '']);
+      setSuccessMessage(`A fresh 6-digit verification code has been sent to ${trimmedEmail}.`);
       setTimeout(() => {
         inputRefs.current[0]?.focus();
       }, 200);
     } else {
       setErrorMessage(
-        res.error ||
-          'Failed to send OTP code. Please check your Supabase connection and verify Email Auth is enabled.'
+        res.error || 'Failed to resend verification code. Please wait a moment and try again.'
       );
     }
   };
@@ -114,7 +153,7 @@ export const AuthScreen: React.FC = () => {
     const newDigits = [...otpDigits];
 
     if (cleaned.length > 1) {
-      // Paste handling
+      // Paste handling (e.g. user pasted full 6-digit code)
       const pasted = cleaned.slice(0, 6).split('');
       pasted.forEach((d, i) => {
         newDigits[i] = d;
@@ -157,7 +196,7 @@ export const AuthScreen: React.FC = () => {
 
     const token = codeToVerify || otpDigits.join('');
     if (token.length !== 6) {
-      setErrorMessage('Please enter all 6 digits of the OTP code.');
+      setErrorMessage('Please enter all 6 digits of your verification code.');
       return;
     }
 
@@ -166,659 +205,396 @@ export const AuthScreen: React.FC = () => {
     setIsLoading(false);
 
     if (res.success) {
-      setSuccessMessage('Authentication successful! Welcome to My Wallet.');
+      setSuccessMessage('Verification successful! Opening your wallet...');
     } else {
-      setErrorMessage(res.error || 'Invalid or expired OTP code. Please try again.');
+      setErrorMessage(res.error || 'Invalid or expired verification code. Please try again.');
     }
   };
 
+  // Switch back to email entry
+  const handleChangeEmail = () => {
+    setStep('email');
+    setOtpDigits(['', '', '', '', '', '']);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+  };
+
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardContainer}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={[styles.scrollContainer, isNarrowMobile && styles.scrollContainerNarrow]}
-        keyboardShouldPersistTaps="handled"
+    <SafeAreaView style={styles.safeAreaContainer} edges={['top', 'bottom', 'left', 'right']}>
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={[styles.card, isNarrowMobile && styles.cardNarrow]}>
-          {/* Brand Header */}
-          <View style={styles.brandRow}>
-            <View style={styles.logoCircle}>
-              <Wallet size={28} color={colors.white} />
-            </View>
-            <View style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContainer,
+            isNarrowMobile && styles.scrollContainerNarrow,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.card, isNarrowMobile && styles.cardNarrow]}>
+            {/* 1. BRAND HEADER */}
+            <View style={styles.brandContainer}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleSecretDeveloperTap}
+                style={styles.logoTouchable}
+                accessibilityLabel="MY WALLET Brand Logo"
+              >
+                <Image
+                  source={require('../../../assets/icon.png')}
+                  style={styles.logoImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+
               <Text style={styles.brandTitle}>MY WALLET</Text>
-              <Text style={styles.brandSubtitle}>Personal Finance & Khata Book</Text>
+              <Text style={styles.brandTagline}>Your Money. Your Control.</Text>
+            </View>
+
+            {/* 2. MESSAGES (Alert Banners) */}
+            {errorMessage && (
+              <View style={styles.errorBox}>
+                <AlertCircle size={16} color={colors.expense.text} style={styles.alertIcon} />
+                <Text style={styles.errorText}>{errorMessage}</Text>
+              </View>
+            )}
+
+            {successMessage && (
+              <View style={styles.successBox}>
+                <CheckCircle2 size={16} color={colors.income.text} style={styles.alertIcon} />
+                <Text style={styles.successText}>{successMessage}</Text>
+              </View>
+            )}
+
+            {/* 3. STEP 1: EMAIL ENTRY */}
+            {step === 'email' && (
+              <View style={styles.formContainer}>
+                <View style={styles.headingBlock}>
+                  <Text style={styles.welcomeHeading}>Welcome to MY WALLET</Text>
+                  <Text style={styles.welcomeSubtitle}>
+                    Manage your money, track expenses and stay in control.
+                  </Text>
+                </View>
+
+                {/* Email Input Field */}
+                <View style={styles.inputSection}>
+                  <Text style={styles.fieldLabel}>Email Address</Text>
+                  <Pressable
+                    onPress={() => emailInputRef.current?.focus()}
+                    style={[
+                      styles.inputWrapper,
+                      isEmailFocused && styles.inputWrapperFocused,
+                    ]}
+                  >
+                    <View pointerEvents="none" style={styles.iconContainer}>
+                      <Mail
+                        size={18}
+                        color={isEmailFocused ? colors.brand[600] : colors.slate[400]}
+                      />
+                    </View>
+                    <TextInput
+                      ref={emailInputRef}
+                      style={styles.textInput}
+                      placeholder="Enter your email address"
+                      placeholderTextColor={colors.slate[400]}
+                      value={email}
+                      onChangeText={(val) => {
+                        setEmail(val);
+                        if (errorMessage) setErrorMessage(null);
+                      }}
+                      onFocus={() => setIsEmailFocused(true)}
+                      onBlur={() => setIsEmailFocused(false)}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="email"
+                      importantForAutofill="yes"
+                      editable={!isLoading}
+                      returnKeyType="done"
+                      onSubmitEditing={handleSendOtp}
+                      selectTextOnFocus={false}
+                    />
+                  </Pressable>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    (isLoading || !isEmailValid) && styles.buttonDisabled,
+                  ]}
+                  onPress={handleSendOtp}
+                  disabled={isLoading || !isEmailValid}
+                  activeOpacity={0.85}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color={colors.white} size="small" />
+                  ) : (
+                    <>
+                      <Text style={styles.primaryButtonText}>Continue with Email</Text>
+                      <ArrowRight size={18} color={colors.white} strokeWidth={2.4} />
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Passwordless Security Message */}
+                <View style={styles.securityRow}>
+                  <ShieldCheck size={16} color={colors.brand[600]} style={{ marginTop: 1 }} />
+                  <Text style={styles.securityText}>
+                    We'll send a 6-digit verification code to your email. Passwordless & secure.
+                  </Text>
+                </View>
+
+                {/* Offline / Guest Mode Access */}
+                <View style={styles.offlineRow}>
+                  <TouchableOpacity
+                    onPress={enableGuestMode}
+                    activeOpacity={0.7}
+                    style={styles.offlineButton}
+                  >
+                    <Text style={styles.offlineText}>Explore in Offline Mode</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* 4. STEP 2: 6-DIGIT OTP VERIFICATION */}
+            {step === 'otp' && (
+              <View style={styles.formContainer}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={handleChangeEmail}
+                  activeOpacity={0.7}
+                >
+                  <ArrowLeft size={15} color={colors.brand[600]} />
+                  <Text style={styles.backButtonText}>Change Email</Text>
+                </TouchableOpacity>
+
+                <View style={styles.headingBlock}>
+                  <Text style={styles.welcomeHeading}>Verify Your Email</Text>
+                  <Text style={styles.welcomeSubtitle}>
+                    Enter the 6-digit verification code sent to{'\n'}
+                    <Text style={styles.emailHighlight}>{email}</Text>
+                  </Text>
+                </View>
+
+                {/* 6-Digit OTP Box Array */}
+                <View style={styles.otpSection}>
+                  <Text style={styles.otpLabel}>6-Digit Verification Code</Text>
+                  <View style={[styles.otpRow, isNarrowMobile && styles.otpRowNarrow]}>
+                    {otpDigits.map((digit, idx) => {
+                      const isFocused = focusedOtpIndex === idx;
+                      const isFilled = digit.length > 0;
+
+                      return (
+                        <TextInput
+                          key={idx}
+                          ref={(ref) => {
+                            inputRefs.current[idx] = ref;
+                          }}
+                          style={[
+                            styles.otpInput,
+                            isNarrowMobile && styles.otpInputNarrow,
+                            isFilled && styles.otpInputFilled,
+                            isFocused && styles.otpInputFocused,
+                          ]}
+                          value={digit}
+                          onChangeText={(val) => handleDigitChange(val, idx)}
+                          onKeyPress={(e) => handleKeyPress(e, idx)}
+                          onFocus={() => setFocusedOtpIndex(idx)}
+                          onBlur={() => setFocusedOtpIndex(null)}
+                          keyboardType="number-pad"
+                          maxLength={idx === 0 ? 6 : 1}
+                          selectTextOnFocus
+                          editable={!isLoading}
+                        />
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {/* Primary Verification Action */}
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    (isLoading || otpDigits.join('').length !== 6) && styles.buttonDisabled,
+                  ]}
+                  onPress={() => handleVerifyOtp()}
+                  disabled={isLoading || otpDigits.join('').length !== 6}
+                  activeOpacity={0.85}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color={colors.white} size="small" />
+                  ) : (
+                    <>
+                      <Lock size={16} color={colors.white} strokeWidth={2.4} />
+                      <Text style={styles.primaryButtonText}>Verify & Access Wallet</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Helpful Delivery & Spam Notice */}
+                <View style={styles.spamTipBox}>
+                  <View style={styles.spamTipRow}>
+                    <Mail size={15} color={colors.brand[700]} style={styles.spamTipIcon} />
+                    <Text style={styles.spamTipText}>
+                      If you don't see the email in your inbox, please check your{' '}
+                      <Text style={styles.spamTipBold}>Spam</Text> or{' '}
+                      <Text style={styles.spamTipBold}>Junk</Text> folder.
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Resend Code Section with 30s Countdown */}
+                <View style={styles.resendSection}>
+                  <Text style={styles.resendPrompt}>Didn't receive the code?</Text>
+                  {resendCooldown > 0 ? (
+                    <View style={styles.cooldownBadge}>
+                      <Text style={styles.cooldownText}>Resend in {resendCooldown}s</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={handleResendOtp}
+                      disabled={isLoading}
+                      activeOpacity={0.7}
+                      style={[styles.resendActionButton, isLoading && styles.buttonDisabled]}
+                    >
+                      {isLoading ? (
+                        <ActivityIndicator size="small" color={colors.brand[600]} />
+                      ) : (
+                        <>
+                          <RotateCcw size={13} color={colors.brand[600]} />
+                          <Text style={styles.resendActionText}>Resend Code</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* 5. SUBTLE FINTECH FOOTNOTE */}
+            <View style={styles.footerNoteRow}>
+              <Text style={styles.footerNoteText}>
+                MY WALLET • Protected by Row Level Security
+              </Text>
             </View>
           </View>
+        </ScrollView>
 
-          {/* 1. CONNECTION STATUS BANNER */}
-          {connectionStatus === 'connected' && (
-            <View style={styles.connectedBanner}>
-              <View style={styles.statusDotGreen} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.connectedTitle}>Supabase Connected</Text>
-                <Text style={styles.connectedSubtitle} numberOfLines={1}>
-                  {projectDomain || 'ruhifsmbgfhxoumfvoyl.supabase.co'}{latencyMs ? ` • ${latencyMs}ms` : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.apiSettingsBtn}
-                onPress={() => setIsConfigModalOpen(true)}
-              >
-                <Settings size={13} color={colors.brand[600]} />
-                <Text style={styles.apiSettingsText}>API Settings</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {connectionStatus === 'checking' && (
-            <View style={styles.checkingBanner}>
-              <ActivityIndicator size="small" color={colors.brand[600]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.checkingTitle}>Connecting to Supabase...</Text>
-                <Text style={styles.checkingSubtitle} numberOfLines={1}>
-                  Verifying secure connection to cloud database
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {connectionStatus === 'not_configured' && (
-            <View style={styles.unconfiguredBanner}>
-              <AlertCircle size={18} color={colors.warning.text} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.unconfiguredTitle}>Supabase Connection Failed</Text>
-                <Text style={styles.unconfiguredText}>
-                  {connectionError || 'Supabase credentials are not configured. Connect your Supabase project to enable email OTP login and cloud backup.'}
-                </Text>
-                <View style={styles.unconfiguredActions}>
-                  <TouchableOpacity
-                    style={styles.configBtn}
-                    onPress={() => setIsConfigModalOpen(true)}
-                  >
-                    <Settings size={13} color={colors.brand[700]} />
-                    <Text style={styles.configBtnText}>Enter API Keys</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.guestBtn}
-                    onPress={enableGuestMode}
-                  >
-                    <Text style={styles.guestBtnText}>Use Offline Mode</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {connectionStatus === 'error' && (
-            <View style={styles.errorBanner}>
-              <AlertCircle size={18} color={colors.expense.text} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.errorBannerTitle}>Supabase Connection Failed</Text>
-                <Text style={styles.errorBannerSubtitle}>
-                  {connectionError || 'Could not verify connection to Supabase.'}
-                </Text>
-                <View style={styles.unconfiguredActions}>
-                  <TouchableOpacity
-                    style={styles.configBtn}
-                    onPress={() => setIsConfigModalOpen(true)}
-                  >
-                    <Settings size={13} color={colors.brand[700]} />
-                    <Text style={styles.configBtnText}>Fix API Keys</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.guestBtn}
-                    onPress={() => checkConnection()}
-                  >
-                    <RotateCcw size={13} color={colors.slate[700]} />
-                    <Text style={styles.guestBtnText}>Retry Connection</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {connectionStatus === 'offline' && (
-            <View style={styles.offlineBanner}>
-              <AlertCircle size={18} color={colors.slate[600]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.offlineTitle}>Supabase Connection Failed</Text>
-                <Text style={styles.offlineText}>
-                  {connectionError || 'Cannot reach Supabase servers. Check your internet connection or use offline mode.'}
-                </Text>
-                <View style={styles.unconfiguredActions}>
-                  <TouchableOpacity
-                    style={styles.guestBtn}
-                    onPress={() => checkConnection()}
-                  >
-                    <RotateCcw size={13} color={colors.slate[700]} />
-                    <Text style={styles.guestBtnText}>Retry Connection</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.guestBtn}
-                    onPress={enableGuestMode}
-                  >
-                    <Text style={styles.guestBtnText}>Use Offline Mode</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* Messages */}
-          {errorMessage && (
-            <View style={styles.errorBox}>
-              <AlertCircle size={16} color={colors.expense.text} />
-              <Text style={styles.errorText}>{errorMessage}</Text>
-            </View>
-          )}
-
-          {successMessage && (
-            <View style={styles.successBox}>
-              <CheckCircle2 size={16} color={colors.income.text} />
-              <Text style={styles.successText}>{successMessage}</Text>
-            </View>
-          )}
-
-          {/* STEP 1: EMAIL INPUT FOR OTP */}
-          {step === 'email' && (
-            <View style={styles.stepContent}>
-              <View style={styles.headerBlock}>
-                <Text style={styles.stepTitle}>Sign In with Email OTP</Text>
-                <Text style={styles.stepDesc}>
-                  Enter your email address to receive a secure 6-digit verification code. Works for both new accounts and existing wallets.
-                </Text>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Email Address</Text>
-                <View style={styles.inputWrapper}>
-                  <Mail size={18} color={colors.slate[400]} style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="name@example.com"
-                    placeholderTextColor={colors.slate[400]}
-                    value={email}
-                    onChangeText={setEmail}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    editable={!isLoading}
-                  />
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.primaryBtn, isLoading && styles.btnDisabled]}
-                onPress={handleSendOtp}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <>
-                    <Text style={styles.primaryBtnText}>Send Verification OTP</Text>
-                    <ArrowRight size={18} color={colors.white} />
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <View style={styles.securityNote}>
-                <ShieldCheck size={14} color={colors.brand[600]} />
-                <Text style={styles.securityNoteText}>
-                  Passwordless authentication with Supabase Row Level Security (RLS) data isolation.
-                </Text>
-              </View>
-
-              {/* Help & Setup Guide Accordion */}
-              <TouchableOpacity
-                style={styles.guideToggle}
-                onPress={() => setShowSetupGuide(!showSetupGuide)}
-                activeOpacity={0.7}
-              >
-                <HelpCircle size={14} color={colors.slate[500]} />
-                <Text style={styles.guideToggleText}>Supabase Email OTP Setup Checklist</Text>
-                {showSetupGuide ? (
-                  <ChevronUp size={14} color={colors.slate[500]} />
-                ) : (
-                  <ChevronDown size={14} color={colors.slate[500]} />
-                )}
-              </TouchableOpacity>
-
-              {showSetupGuide && (
-                <View style={styles.guideBox}>
-                  <Text style={styles.guideStep}>
-                    1. <Text style={styles.boldText}>Enable Email Provider:</Text> In Supabase Dashboard → Authentication → Providers → Email, ensure "Enable Email provider" is checked.
-                  </Text>
-                  <Text style={styles.guideStep}>
-                    2. <Text style={styles.boldText}>Database Schema:</Text> In Supabase Dashboard → SQL Editor, run <Text style={styles.codeText}>supabase/schema.sql</Text> to initialize tables and RLS policies.
-                  </Text>
-                  <Text style={styles.guideStep}>
-                    3. <Text style={styles.boldText}>Confirm Signup Template (New Users):</Text> In Supabase Dashboard → Authentication → Email Templates → Confirm Signup, include <Text style={styles.codeText}>{"{{ .Token }}"}</Text> so newly registered users receive a 6-digit OTP code.
-                  </Text>
-                  <Text style={styles.guideStep}>
-                    4. <Text style={styles.boldText}>Magic Link Template (Existing Users):</Text> In Supabase Dashboard → Authentication → Email Templates → Magic Link, include <Text style={styles.codeText}>{"{{ .Token }}"}</Text> so returning users receive a 6-digit OTP code.
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* STEP 2: 6-DIGIT OTP VERIFICATION */}
-          {step === 'otp' && (
-            <View style={styles.stepContent}>
-              <TouchableOpacity
-                style={styles.backBtn}
-                onPress={() => {
-                  setStep('email');
-                  setOtpDigits(['', '', '', '', '', '']);
-                  setErrorMessage(null);
-                }}
-              >
-                <ArrowLeft size={16} color={colors.slate[600]} />
-                <Text style={styles.backBtnText}>Change Email</Text>
-              </TouchableOpacity>
-
-              <View style={styles.headerBlock}>
-                <Text style={styles.stepTitle}>Verify Email OTP</Text>
-                <Text style={styles.stepDesc}>
-                  Enter the 6-digit verification code sent to{' '}
-                  <Text style={styles.emailHighlight}>{email}</Text>
-                </Text>
-              </View>
-
-              {/* 6 Digit Input Boxes */}
-              <View style={[styles.otpBoxesRow, isNarrowMobile && styles.otpBoxesRowNarrow]}>
-                {otpDigits.map((digit, idx) => (
-                  <TextInput
-                    key={idx}
-                    ref={(ref) => {
-                      inputRefs.current[idx] = ref;
-                    }}
-                    style={[
-                      styles.otpBox,
-                      isNarrowMobile && styles.otpBoxNarrow,
-                      digit ? styles.otpBoxFilled : null,
-                    ]}
-                    value={digit}
-                    onChangeText={(val) => handleDigitChange(val, idx)}
-                    onKeyPress={(e) => handleKeyPress(e, idx)}
-                    keyboardType="number-pad"
-                    maxLength={idx === 0 ? 6 : 1}
-                    selectTextOnFocus
-                    editable={!isLoading}
-                  />
-                ))}
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.primaryBtn,
-                  (isLoading || otpDigits.join('').length !== 6) && styles.btnDisabled,
-                ]}
-                onPress={() => handleVerifyOtp()}
-                disabled={isLoading || otpDigits.join('').length !== 6}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <>
-                    <KeyRound size={18} color={colors.white} />
-                    <Text style={styles.primaryBtnText}>Verify & Access Wallet</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              {/* Resend OTP */}
-              <View style={styles.resendRow}>
-                <Text style={styles.resendLabel}>Didn't receive the code?</Text>
-                <TouchableOpacity
-                  disabled={resendCooldown > 0 || isLoading}
-                  onPress={handleSendOtp}
-                  style={styles.resendBtn}
-                >
-                  <RotateCcw
-                    size={14}
-                    color={resendCooldown > 0 ? colors.slate[400] : colors.brand[600]}
-                  />
-                  <Text
-                    style={[
-                      styles.resendBtnText,
-                      resendCooldown > 0 && styles.resendBtnTextDisabled,
-                    ]}
-                  >
-                    {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend OTP'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Help Callout for Supabase 6-Digit OTP Templates */}
-              <TouchableOpacity
-                style={styles.guideToggle}
-                onPress={() => setShowOtpHelp(!showOtpHelp)}
-                activeOpacity={0.7}
-              >
-                <HelpCircle size={14} color={colors.brand[600]} />
-                <Text style={[styles.guideToggleText, { color: colors.brand[700] }]}>
-                  OTP not arriving to existing email? (Troubleshooting)
-                </Text>
-                {showOtpHelp ? (
-                  <ChevronUp size={14} color={colors.brand[600]} />
-                ) : (
-                  <ChevronDown size={14} color={colors.brand[600]} />
-                )}
-              </TouchableOpacity>
-
-              {showOtpHelp && (
-                <View style={styles.guideBox}>
-                  <Text style={styles.guideStep}>
-                    <Text style={styles.boldText}>1. Magic Link Template (Existing Users):</Text> In Supabase Dashboard → <Text style={styles.boldText}>Authentication → Email Templates → Magic Link</Text>, ensure the template body includes <Text style={styles.codeText}>{"{{ .Token }}"}</Text>. Supabase uses "Confirm Signup" for new accounts, but uses "Magic Link" for existing accounts!
-                  </Text>
-                  <Text style={styles.guideStep}>
-                    <Text style={styles.boldText}>2. SMTP Suppression / Bounce List:</Text> If your custom SMTP previously had an HTTP 504 timeout, your email provider (e.g. Resend, Brevo, SendGrid) may have placed your email on its <Text style={styles.boldText}>Suppression / Bounce List</Text>. Log into your SMTP dashboard and delete/unsuppress your email.
-                  </Text>
-                  <Text style={styles.guideStep}>
-                    <Text style={styles.boldText}>3. Check Spam & Promotions:</Text> Search Gmail's <Text style={styles.boldText}>Spam</Text> and <Text style={styles.boldText}>Promotions</Text> folders for emails from your sender or <Text style={styles.codeText}>noreply@mail.app.supabase.io</Text>.
-                  </Text>
-                  <Text style={styles.guideStep}>
-                    <Text style={styles.boldText}>4. Rate Limits:</Text> Wait 60 seconds before tapping <Text style={styles.boldText}>Resend OTP</Text> to avoid Supabase rate limit throttling.
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* Supabase Configuration Modal */}
-        <SupabaseConfigModal
-          visible={isConfigModalOpen}
-          onClose={() => setIsConfigModalOpen(false)}
-        />
-      </ScrollView>
-    </KeyboardAvoidingView>
+        {/* Protected Developer Configuration Modal outside ScrollView */}
+        {isConfigModalOpen && (
+          <SupabaseConfigModal
+            visible={isConfigModalOpen}
+            onClose={() => setIsConfigModalOpen(false)}
+          />
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeAreaContainer: {
+    flex: 1,
+    backgroundColor: colors.slate[50],
+  },
   keyboardContainer: {
     flex: 1,
-    backgroundColor: colors.slate[100],
   },
   scrollContainer: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 32,
   },
   scrollContainerNarrow: {
-    padding: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 20,
   },
   card: {
     width: '100%',
-    maxWidth: 440,
+    maxWidth: 420,
     backgroundColor: colors.white,
-    borderRadius: 22,
-    padding: 24,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    paddingHorizontal: 26,
+    paddingVertical: 30,
     shadowColor: colors.slate[900],
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 24,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.05,
+    shadowRadius: 28,
+    elevation: 3,
   },
   cardNarrow: {
-    padding: 14,
-    borderRadius: 18,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 22,
   },
-  brandRow: {
-    flexDirection: 'row',
+  brandContainer: {
     alignItems: 'center',
-    gap: 14,
-    marginBottom: 18,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.slate[100],
+    marginBottom: 24,
   },
-  logoCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+  logoTouchable: {
+    marginBottom: 12,
+    shadowColor: colors.brand[600],
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  logoImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
     backgroundColor: colors.brand[600],
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   brandTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: colors.slate[900],
+    letterSpacing: 0.8,
+  },
+  brandTagline: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.slate[400],
+    letterSpacing: 0.3,
+    marginTop: 3,
+  },
+  formContainer: {
+    gap: 18,
+  },
+  headingBlock: {
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  welcomeHeading: {
     fontSize: 20,
     fontWeight: '800',
     color: colors.slate[900],
-    letterSpacing: 0.5,
+    letterSpacing: -0.3,
+    textAlign: 'center',
   },
-  brandSubtitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.slate[500],
-  },
-  connectedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: colors.income.bg,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.income.border,
-    marginBottom: 16,
-  },
-  statusDotGreen: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.income.solid,
-  },
-  connectedTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: colors.income.text,
-  },
-  connectedSubtitle: {
-    fontSize: 10,
-    color: colors.slate[600],
-    marginTop: 1,
-  },
-  checkingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: colors.brand[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.brand[200],
-    marginBottom: 16,
-  },
-  checkingTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: colors.brand[700],
-  },
-  checkingSubtitle: {
-    fontSize: 10,
-    color: colors.slate[600],
-    marginTop: 1,
-  },
-  apiSettingsBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: colors.white,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.brand[200],
-  },
-  apiSettingsText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.brand[700],
-  },
-  unconfiguredBanner: {
-    flexDirection: 'row',
-    gap: 10,
-    padding: 14,
-    backgroundColor: colors.warning.bg,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.warning.border,
-    marginBottom: 16,
-  },
-  unconfiguredTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.warning.text,
-  },
-  unconfiguredText: {
-    fontSize: 11,
-    color: colors.slate[600],
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  unconfiguredActions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  configBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: colors.white,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.brand[300],
-  },
-  configBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.brand[700],
-  },
-  guestBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: colors.slate[200],
-    borderRadius: 8,
-  },
-  guestBtnText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.slate[700],
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    gap: 10,
-    padding: 14,
-    backgroundColor: colors.expense.bg,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.expense.border,
-    marginBottom: 16,
-  },
-  errorBannerTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.expense.text,
-  },
-  errorBannerSubtitle: {
-    fontSize: 11,
-    color: colors.slate[600],
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  offlineBanner: {
-    flexDirection: 'row',
-    gap: 10,
-    padding: 14,
-    backgroundColor: colors.slate[100],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.slate[200],
-    marginBottom: 16,
-  },
-  offlineTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.slate[800],
-  },
-  offlineText: {
-    fontSize: 11,
-    color: colors.slate[600],
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: colors.expense.bg,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.expense.border,
-    marginBottom: 14,
-  },
-  errorText: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.expense.text,
-    fontWeight: '500',
-  },
-  successBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: colors.income.bg,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.income.border,
-    marginBottom: 14,
-  },
-  successText: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.income.text,
-    fontWeight: '500',
-  },
-  stepContent: {
-    gap: 16,
-  },
-  headerBlock: {
-    marginBottom: 4,
-  },
-  stepTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.slate[900],
-  },
-  stepDesc: {
+  welcomeSubtitle: {
     fontSize: 13,
     color: colors.slate[500],
-    marginTop: 4,
+    textAlign: 'center',
+    marginTop: 6,
     lineHeight: 18,
+    paddingHorizontal: 6,
   },
   emailHighlight: {
     fontWeight: '700',
-    color: colors.brand[700],
+    color: colors.brand[600],
   },
-  inputGroup: {
+  inputSection: {
     gap: 6,
   },
-  inputLabel: {
+  fieldLabel: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.slate[700],
@@ -826,82 +602,120 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
+    height: 50,
+    borderWidth: 1.5,
     borderColor: colors.slate[200],
-    borderRadius: 12,
+    borderRadius: 14,
     backgroundColor: colors.slate[50],
-    paddingHorizontal: 12,
-    height: 48,
+    paddingHorizontal: 14,
   },
-  inputIcon: {
-    marginRight: 8,
+  inputWrapperFocused: {
+    borderColor: colors.brand[600],
+    backgroundColor: colors.white,
+  },
+  iconContainer: {
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   textInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.slate[900],
+    fontWeight: '500',
+    paddingVertical: 0,
+    alignSelf: 'stretch',
+    backgroundColor: 'transparent',
   },
-  primaryBtn: {
+  primaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     backgroundColor: colors.brand[600],
-    borderRadius: 12,
-    height: 48,
+    height: 50,
+    borderRadius: 14,
     shadowColor: colors.brand[600],
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 3,
     marginTop: 4,
   },
-  btnDisabled: {
+  buttonDisabled: {
     opacity: 0.6,
   },
-  primaryBtnText: {
-    fontSize: 14,
+  primaryButtonText: {
+    fontSize: 15,
     fontWeight: '700',
     color: colors.white,
+    letterSpacing: 0.2,
   },
-  securityNote: {
+  securityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.slate[100],
+    paddingHorizontal: 2,
   },
-  securityNoteText: {
+  securityText: {
     flex: 1,
     fontSize: 11,
     color: colors.slate[500],
-    lineHeight: 15,
+    lineHeight: 16,
   },
-  backBtn: {
+  offlineRow: {
+    alignItems: 'center',
+    paddingTop: 2,
+  },
+  offlineButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  offlineText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.slate[500],
+    textDecorationLine: 'underline',
+  },
+  backButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
     paddingVertical: 4,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    backgroundColor: `${colors.brand[500]}10`,
   },
-  backBtnText: {
-    fontSize: 13,
-    color: colors.slate[600],
-    fontWeight: '600',
+  backButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.brand[600],
   },
-  otpBoxesRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  otpSection: {
     gap: 8,
-    marginVertical: 10,
+    alignItems: 'center',
   },
-  otpBoxesRowNarrow: {
+  otpLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.slate[700],
+  },
+  otpRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    width: '100%',
+    paddingVertical: 4,
+  },
+  otpRowNarrow: {
     gap: 5,
-    marginVertical: 8,
   },
-  otpBox: {
+  otpInput: {
     flex: 1,
+    maxWidth: 48,
+    minWidth: 36,
     height: 52,
     borderWidth: 1.5,
     borderColor: colors.slate[200],
@@ -909,75 +723,138 @@ const styles = StyleSheet.create({
     backgroundColor: colors.slate[50],
     textAlign: 'center',
     fontSize: 22,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.slate[900],
   },
-  otpBoxNarrow: {
-    height: 44,
+  otpInputNarrow: {
+    height: 46,
     fontSize: 18,
     borderRadius: 10,
   },
-  otpBoxFilled: {
-    borderColor: colors.brand[600],
-    backgroundColor: colors.brand[50],
+  otpInputFilled: {
+    borderColor: colors.brand[500],
+    backgroundColor: `${colors.brand[500]}0c`,
+    color: colors.slate[900],
   },
-  resendRow: {
+  otpInputFocused: {
+    borderColor: colors.brand[600],
+    backgroundColor: colors.white,
+  },
+  resendSection: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    marginTop: 8,
+    paddingTop: 4,
   },
-  resendLabel: {
+  resendPrompt: {
     fontSize: 12,
     color: colors.slate[500],
   },
-  resendBtn: {
+  cooldownBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: colors.slate[100],
+  },
+  cooldownText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.slate[500],
+  },
+  resendActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: `${colors.brand[500]}10`,
   },
-  resendBtnText: {
+  resendActionText: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.brand[600],
   },
-  resendBtnTextDisabled: {
-    color: colors.slate[400],
-  },
-  guideToggle: {
+  errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    marginTop: 4,
+    backgroundColor: colors.expense.bg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.expense.border,
+    marginBottom: 14,
   },
-  guideToggleText: {
+  alertIcon: {
+    marginRight: 8,
+    flexShrink: 0,
+  },
+  errorText: {
+    flex: 1,
     fontSize: 12,
     fontWeight: '600',
-    color: colors.slate[600],
-  },
-  guideBox: {
-    backgroundColor: colors.slate[50],
-    borderWidth: 1,
-    borderColor: colors.slate[200],
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-  },
-  guideStep: {
-    fontSize: 11,
-    color: colors.slate[600],
+    color: colors.expense.text,
     lineHeight: 16,
   },
-  boldText: {
-    fontWeight: '700',
+  successBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.income.bg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.income.border,
+    marginBottom: 14,
+  },
+  successText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.income.text,
+    lineHeight: 16,
+  },
+  spamTipBox: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.slate[200],
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 6,
+  },
+  spamTipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  spamTipIcon: {
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  spamTipText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.slate[600],
+    lineHeight: 18,
+  },
+  spamTipBold: {
+    fontWeight: '800',
     color: colors.slate[800],
   },
-  codeText: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    color: colors.brand[700],
-    fontWeight: '700',
+  footerNoteRow: {
+    marginTop: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.slate[100],
+    alignItems: 'center',
+  },
+  footerNoteText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.slate[400],
+    letterSpacing: 0.2,
   },
 });

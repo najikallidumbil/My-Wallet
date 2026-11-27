@@ -348,12 +348,12 @@ export const CategoryManagementModal: React.FC<CategoryManagementModalProps> = (
               <View style={styles.titleIconBox}>
                 <Tag size={18} color={colors.brand[600]} />
               </View>
-              <View>
-                <Text style={styles.title}>Categories & Subcategories</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.title} numberOfLines={1}>Categories & Subcategories</Text>
                 <Text style={styles.subtitle}>Customize your finance structure</Text>
               </View>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
               <X size={20} color={colors.slate[600]} />
             </TouchableOpacity>
           </View>
@@ -746,6 +746,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
   },
   titleIconBox: {
     width: 36,
@@ -756,6 +759,7 @@ const styles = StyleSheet.create({
     borderColor: colors.brand[200],
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   title: {
     fontSize: 16,
@@ -769,6 +773,9 @@ const styles = StyleSheet.create({
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   tabContainer: {
     flexDirection: 'row',

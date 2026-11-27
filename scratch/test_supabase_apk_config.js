@@ -95,11 +95,10 @@ test('supabase.ts testSupabaseConnection checks /auth/v1/health with apikey', ()
 
 const authScreenSrc = fs.readFileSync(path.join(__dirname, '../src/components/auth/AuthScreen.tsx'), 'utf8');
 
-test('AuthScreen displays Connected, Connecting, and Connection Failed states', () => {
-  assert(authScreenSrc.includes("connectionStatus === 'connected'"), 'Must handle connected');
-  assert(authScreenSrc.includes("connectionStatus === 'checking'"), 'Must handle connecting (checking)');
-  assert(authScreenSrc.includes("Connecting to Supabase..."), 'Must show connecting text');
-  assert(authScreenSrc.includes("Supabase Connection Failed"), 'Must show connection failed text');
+test('AuthScreen cleanly removes raw developer badges and connects to Supabase OTP auth', () => {
+  assert(!authScreenSrc.includes('Supabase Connected'), 'Must NOT display raw Supabase Connected card on normal login screen');
+  assert(authScreenSrc.includes('sendOtp'), 'Must wire to sendOtp');
+  assert(authScreenSrc.includes('verifyOtp'), 'Must wire to verifyOtp');
 });
 
 console.log('\n===============================================================');

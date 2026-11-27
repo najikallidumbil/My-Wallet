@@ -1355,14 +1355,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
   },
   title: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.slate[900],
+    flexShrink: 1,
   },
   closeBtn: {
-    padding: 4,
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   scrollContent: {
     padding: 16,

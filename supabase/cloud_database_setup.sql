@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
 -- C. ACCOUNTS TABLE
 CREATE TABLE IF NOT EXISTS public.accounts (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     type TEXT NOT NULL DEFAULT 'bank',
     opening_balance NUMERIC(14, 2) DEFAULT 0,
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS public.categories (
 -- F. SUBCATEGORIES TABLE
 CREATE TABLE IF NOT EXISTS public.subcategories (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     category_id TEXT NOT NULL REFERENCES public.categories(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     budget NUMERIC(14, 2) DEFAULT 0,
@@ -297,7 +297,7 @@ CREATE POLICY "settings_insert" ON public.user_settings FOR INSERT WITH CHECK (a
 CREATE POLICY "settings_update" ON public.user_settings FOR UPDATE USING (auth.uid() = user_id);
 
 -- Accounts Policies
-CREATE POLICY "accounts_select" ON public.accounts FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "accounts_select" ON public.accounts FOR SELECT USING (user_id IS NULL OR auth.uid() = user_id);
 CREATE POLICY "accounts_insert" ON public.accounts FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "accounts_update" ON public.accounts FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "accounts_delete" ON public.accounts FOR DELETE USING (auth.uid() = user_id);
@@ -314,8 +314,11 @@ CREATE POLICY "categories_insert" ON public.categories FOR INSERT WITH CHECK (au
 CREATE POLICY "categories_update" ON public.categories FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "categories_delete" ON public.categories FOR DELETE USING (auth.uid() = user_id);
 
--- Subcategories Policies
-CREATE POLICY "subcategories_all" ON public.subcategories FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+-- Subcategories Policies (View default subcategories OR own custom ones)
+CREATE POLICY "subcategories_select" ON public.subcategories FOR SELECT USING (user_id IS NULL OR auth.uid() = user_id);
+CREATE POLICY "subcategories_insert" ON public.subcategories FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "subcategories_update" ON public.subcategories FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "subcategories_delete" ON public.subcategories FOR DELETE USING (auth.uid() = user_id);
 
 -- Budgets Policies
 CREATE POLICY "budgets_all" ON public.budgets FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
@@ -445,26 +448,78 @@ DROP TRIGGER IF EXISTS tr_transactions_updated_at ON public.transactions;
 CREATE TRIGGER tr_transactions_updated_at BEFORE UPDATE ON public.transactions FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ------------------------------------------------------------------------------
--- 7. DEFAULT SYSTEM CATEGORIES SEED DATA
+-- 7. DEFAULT SYSTEM CATEGORIES & SUBCATEGORIES SEED DATA
 -- ------------------------------------------------------------------------------
-INSERT INTO public.categories (id, user_id, name, type, icon, color, is_default) VALUES
-('cat-salary', NULL, 'Salary', 'income', 'Briefcase', '#10b981', true),
-('cat-business', NULL, 'Business & Projects', 'income', 'TrendingUp', '#059669', true),
-('cat-investments', NULL, 'Investments & Dividends', 'income', 'Coins', '#047857', true),
-('cat-rental', NULL, 'Rental Income', 'income', 'Home', '#34d399', true),
-('cat-rewards', NULL, 'Cashback & Rewards', 'income', 'Gift', '#2dd4bf', true),
-('cat-other-income', NULL, 'Other Income', 'income', 'Wallet', '#6ee7b7', true),
-('cat-food', NULL, 'Food & Dining', 'expense', 'Utensils', '#f43f5e', true),
-('cat-groceries', NULL, 'Groceries & Mart', 'expense', 'ShoppingCart', '#e11d48', true),
-('cat-rent', NULL, 'Rent & Housing', 'expense', 'Building', '#be123c', true),
-('cat-utilities', NULL, 'Bills & Utilities', 'expense', 'Zap', '#9f1239', true),
-('cat-transport', NULL, 'Fuel & Transportation', 'expense', 'Car', '#fb7185', true),
-('cat-shopping', NULL, 'Shopping & Electronics', 'expense', 'ShoppingBag', '#ec4899', true),
-('cat-healthcare', NULL, 'Healthcare & Medicine', 'expense', 'HeartPulse', '#d946ef', true),
-('cat-entertainment', NULL, 'Entertainment & OTT', 'expense', 'Film', '#8b5cf6', true),
-('cat-education', NULL, 'Education & Learning', 'expense', 'GraduationCap', '#6366f1', true),
-('cat-other-expense', NULL, 'Miscellaneous', 'expense', 'MoreHorizontal', '#64748b', true)
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.categories (id, user_id, name, type, icon, color, is_default, budget) VALUES
+    -- Standard Income Categories
+    ('cat-inc-1', NULL, 'Salary', 'income', 'Briefcase', '#10b981', true, 0),
+    ('cat-inc-2', NULL, 'Freelance & Projects', 'income', 'TrendingUp', '#059669', true, 0),
+    ('cat-inc-3', NULL, 'Investments & Dividends', 'income', 'Coins', '#047857', true, 0),
+    ('cat-inc-4', NULL, 'Cashback & Rewards', 'income', 'Gift', '#34d399', true, 0),
+    ('cat-inc-5', NULL, 'Rental Income', 'income', 'Home', '#2dd4bf', true, 0),
+    ('cat-inc-6', NULL, 'Other Income', 'income', 'Wallet', '#6ee7b7', true, 0),
+
+    -- Standard Expense Categories
+    ('cat-exp-1', NULL, 'Food & Dining', 'expense', 'Utensils', '#f43f5e', true, 0),
+    ('cat-exp-2', NULL, 'Groceries & Mart', 'expense', 'ShoppingCart', '#e11d48', true, 0),
+    ('cat-exp-3', NULL, 'Rent & Housing', 'expense', 'Building', '#be123c', true, 0),
+    ('cat-exp-4', NULL, 'Bills & Utilities', 'expense', 'Zap', '#9f1239', true, 0),
+    ('cat-exp-5', NULL, 'Fuel & Transportation', 'expense', 'Car', '#fb7185', true, 0),
+    ('cat-exp-6', NULL, 'Shopping & Electronics', 'expense', 'ShoppingBag', '#ec4899', true, 0),
+    ('cat-exp-7', NULL, 'Healthcare & Medicine', 'expense', 'HeartPulse', '#d946ef', true, 0),
+    ('cat-exp-8', NULL, 'Entertainment & OTT', 'expense', 'Film', '#8b5cf6', true, 0),
+    ('cat-exp-9', NULL, 'Education & Learning', 'expense', 'GraduationCap', '#6366f1', true, 0),
+    ('cat-exp-10', NULL, 'Miscellaneous', 'expense', 'MoreHorizontal', '#64748b', true, 0),
+
+    -- Legacy Aliases
+    ('cat-salary', NULL, 'Salary', 'income', 'Briefcase', '#10b981', true, 0),
+    ('cat-business', NULL, 'Business & Projects', 'income', 'TrendingUp', '#059669', true, 0),
+    ('cat-investments', NULL, 'Investments & Dividends', 'income', 'Coins', '#047857', true, 0),
+    ('cat-rental', NULL, 'Rental Income', 'income', 'Home', '#34d399', true, 0),
+    ('cat-rewards', NULL, 'Cashback & Rewards', 'income', 'Gift', '#2dd4bf', true, 0),
+    ('cat-other-income', NULL, 'Other Income', 'income', 'Wallet', '#6ee7b7', true, 0),
+    ('cat-food', NULL, 'Food & Dining', 'expense', 'Utensils', '#f43f5e', true, 0),
+    ('cat-groceries', NULL, 'Groceries & Mart', 'expense', 'ShoppingCart', '#e11d48', true, 0),
+    ('cat-rent', NULL, 'Rent & Housing', 'expense', 'Building', '#be123c', true, 0),
+    ('cat-utilities', NULL, 'Bills & Utilities', 'expense', 'Zap', '#9f1239', true, 0),
+    ('cat-transport', NULL, 'Fuel & Transportation', 'expense', 'Car', '#fb7185', true, 0),
+    ('cat-shopping', NULL, 'Shopping & Electronics', 'expense', 'ShoppingBag', '#ec4899', true, 0),
+    ('cat-healthcare', NULL, 'Healthcare & Medicine', 'expense', 'HeartPulse', '#d946ef', true, 0),
+    ('cat-entertainment', NULL, 'Entertainment & OTT', 'expense', 'Film', '#8b5cf6', true, 0),
+    ('cat-education', NULL, 'Education & Learning', 'expense', 'GraduationCap', '#6366f1', true, 0),
+    ('cat-other-expense', NULL, 'Miscellaneous', 'expense', 'MoreHorizontal', '#64748b', true, 0)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    type = EXCLUDED.type,
+    icon = EXCLUDED.icon,
+    color = EXCLUDED.color,
+    is_default = true;
+
+-- Seed Default Subcategories
+INSERT INTO public.subcategories (id, user_id, category_id, name, budget) VALUES
+    ('sub-1', NULL, 'cat-exp-1', 'Restaurants & Dining Out', 0),
+    ('sub-2', NULL, 'cat-exp-1', 'Food Delivery (Swiggy/Zomato)', 0),
+    ('sub-3', NULL, 'cat-exp-1', 'Cafes & Snacks', 0),
+    ('sub-4', NULL, 'cat-exp-2', 'Supermarket Supplies', 0),
+    ('sub-5', NULL, 'cat-exp-2', 'Vegetables & Fruits', 0),
+    ('sub-6', NULL, 'cat-exp-2', 'Dairy & Bakery', 0),
+    ('sub-7', NULL, 'cat-exp-3', 'Apartment Rent', 0),
+    ('sub-8', NULL, 'cat-exp-3', 'Society Maintenance', 0),
+    ('sub-9', NULL, 'cat-exp-4', 'Electricity Bill', 0),
+    ('sub-10', NULL, 'cat-exp-4', 'Fiber Wi-Fi Broadband', 0),
+    ('sub-11', NULL, 'cat-exp-4', 'Mobile Postpaid/Prepaid', 0),
+    ('sub-12', NULL, 'cat-exp-5', 'Petrol & Diesel', 0),
+    ('sub-13', NULL, 'cat-exp-5', 'Ola / Uber Cabs', 0),
+    ('sub-14', NULL, 'cat-exp-5', 'Metro & Bus Smart Card', 0),
+    ('sub-15', NULL, 'cat-exp-6', 'Clothing & Apparel', 0),
+    ('sub-16', NULL, 'cat-exp-6', 'Gadgets & Accessories', 0),
+    ('sub-17', NULL, 'cat-exp-7', 'Pharmacy & Medicines', 0),
+    ('sub-18', NULL, 'cat-exp-7', 'Doctor Consultation & Lab', 0),
+    ('sub-19', NULL, 'cat-exp-8', 'OTT Subscriptions (Netflix/Prime)', 0),
+    ('sub-20', NULL, 'cat-exp-8', 'Movie Tickets & Outings', 0)
+ON CONFLICT (id) DO UPDATE SET
+    category_id = EXCLUDED.category_id,
+    name = EXCLUDED.name;
 
 -- Verification Notice
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;

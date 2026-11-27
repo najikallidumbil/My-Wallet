@@ -25,6 +25,8 @@ import {
   TrendingUp,
   TrendingDown,
   Sparkles,
+  Download,
+  FileText,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
@@ -50,6 +52,7 @@ import { BalanceGrowthAreaChart } from '../../components/rn/charts/BalanceGrowth
 import { AnalyticsTransactionModal } from '../../components/rn/analytics/AnalyticsTransactionModal';
 import { CustomDateRangeModal } from '../../components/rn/analytics/CustomDateRangeModal';
 import { TransactionDetailsModal } from '../../components/rn/TransactionDetailsModal';
+import { PdfReportModal } from '../../components/rn/reports/PdfReportModal';
 
 interface OverviewScreenProps {
   onOpenTransfer: () => void;
@@ -95,6 +98,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
   const [customStart, setCustomStart] = useState<string>('');
   const [customEnd, setCustomEnd] = useState<string>('');
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
 
   // Drilldown modal states
   const [drilldownCategory, setDrilldownCategory] = useState<{
@@ -199,14 +203,25 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
               </Text>
             </View>
 
-            <TouchableOpacity
-              style={styles.customDateTrigger}
-              onPress={() => setIsCustomModalOpen(true)}
-              activeOpacity={0.7}
-            >
-              <Calendar size={14} color={colors.brand[600]} />
-              <Text style={styles.customDateTriggerText}>Range</Text>
-            </TouchableOpacity>
+            <View style={styles.headerButtonsRow}>
+              <TouchableOpacity
+                style={styles.downloadPdfTrigger}
+                onPress={() => setIsPdfModalOpen(true)}
+                activeOpacity={0.7}
+              >
+                <Download size={13} color={colors.white} strokeWidth={2.4} />
+                <Text style={styles.downloadPdfTriggerText}>Download PDF</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.customDateTrigger}
+                onPress={() => setIsCustomModalOpen(true)}
+                activeOpacity={0.7}
+              >
+                <Calendar size={13} color={colors.brand[600]} />
+                <Text style={styles.customDateTriggerText}>Range</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Filter Pills Horizontal Scroll */}
@@ -616,10 +631,38 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
           )}
         </View>
 
+        {/* 6.5. Professional PDF Statements & Reports Banner */}
+        <View style={[styles.pdfBannerCard, !isWide && styles.pdfBannerCardMobile]}>
+          <View style={styles.pdfBannerLeft}>
+            <View style={styles.pdfBannerIconBox}>
+              <FileText size={22} color={colors.brand[600]} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.pdfBannerTitle}>Statements & PDF Reports</Text>
+              <Text style={styles.pdfBannerSub}>
+                Export publication-ready financial statements with real records
+              </Text>
+              <View style={styles.pdfBannerTags}>
+                <Text style={styles.pdfBannerTag}>Income & Expense</Text>
+                <Text style={styles.pdfBannerTag}>Khata Ledger</Text>
+                <Text style={styles.pdfBannerTag}>Category Analysis</Text>
+              </View>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={[styles.pdfBannerBtn, !isWide && styles.pdfBannerBtnMobile]}
+            onPress={() => setIsPdfModalOpen(true)}
+            activeOpacity={0.8}
+          >
+            <Download size={14} color={colors.white} strokeWidth={2.2} />
+            <Text style={styles.pdfBannerBtnText}>Export PDF</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* 7. Accounts Grid */}
         <View style={styles.accountsCard}>
           <View style={styles.accountsHeader}>
-            <View>
+            <View style={styles.accountsHeaderLeft}>
               <Text style={styles.cardTitle}>Bank & Digital Wallets</Text>
               <Text style={styles.cardSub}>Liquid balances across accounts</Text>
             </View>
@@ -698,6 +741,14 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
           onClose={() => setInspectTx(null)}
         />
       )}
+
+      {/* Professional PDF Financial Reports Modal */}
+      <PdfReportModal
+        visible={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        initialStartDate={dateRange.startDate}
+        initialEndDate={dateRange.endDate}
+      />
     </ScrollView>
   );
 };
@@ -746,6 +797,30 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: '500',
   },
+  headerButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  downloadPdfTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.brand[600],
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    shadowColor: colors.brand[600],
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  downloadPdfTriggerText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.white,
+  },
   customDateTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -761,6 +836,87 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: colors.brand[600],
+  },
+  pdfBannerCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.brand[100],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  pdfBannerCardMobile: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  pdfBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  pdfBannerIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.brand[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.brand[100],
+  },
+  pdfBannerTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.slate[900],
+  },
+  pdfBannerSub: {
+    fontSize: 11,
+    color: colors.slate[500],
+    marginTop: 2,
+  },
+  pdfBannerTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 6,
+  },
+  pdfBannerTag: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: colors.brand[700],
+    backgroundColor: colors.brand[50],
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  pdfBannerBtn: {
+    backgroundColor: colors.brand[600],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  pdfBannerBtnMobile: {
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  pdfBannerBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.white,
   },
   filterPillsScroll: {
     marginHorizontal: -4,
@@ -815,15 +971,18 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: colors.slate[100],
+    flexWrap: 'wrap',
+    gap: 8,
   },
   kpiMainBox: {
     flex: 1,
+    minWidth: 120,
   },
   kpiDividerVert: {
     width: 1,
     height: 48,
     backgroundColor: colors.slate[100],
-    marginHorizontal: 12,
+    marginHorizontal: 8,
   },
   kpiHeaderRow: {
     flexDirection: 'row',
@@ -863,12 +1022,14 @@ const styles = StyleSheet.create({
   },
   kpiBottomGrid: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     paddingTop: 12,
     paddingBottom: 12,
+    flexWrap: 'wrap',
   },
   kpiTile: {
     flex: 1,
+    minWidth: 130,
     backgroundColor: colors.slate[50],
     padding: 10,
     borderRadius: 14,
@@ -974,13 +1135,18 @@ const styles = StyleSheet.create({
   netWorthHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: 8,
   },
   netWorthTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 10,
+    flex: 1,
+    minWidth: 180,
   },
   netWorthIconBox: {
     width: 36,
@@ -1030,6 +1196,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.slate[100],
+    flexWrap: 'wrap',
+    gap: 6,
   },
   formulaItem: {
     alignItems: 'center',
@@ -1089,6 +1257,7 @@ const styles = StyleSheet.create({
   legendRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: 8,
   },
   legendItem: {
@@ -1096,6 +1265,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flex: 1,
+    minWidth: 80,
   },
   legendDot: {
     width: 8,
@@ -1124,12 +1294,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: 12,
   },
   khataHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
+    minWidth: 160,
   },
   khataHeaderIconBox: {
     width: 34,
@@ -1156,6 +1330,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8,
     backgroundColor: `${colors.brand[500]}12`,
+    flexShrink: 0,
+    alignSelf: 'center',
   },
   viewAllKhataText: {
     fontSize: 11,
@@ -1245,11 +1421,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: 14,
+  },
+  accountsHeaderLeft: {
+    flex: 1,
+    minWidth: 150,
   },
   accountsActions: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
   },
   transferBtn: {
     flexDirection: 'row',

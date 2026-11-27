@@ -20,6 +20,7 @@ import {
   Check,
   ShieldCheck,
   Trash2,
+  Download,
 } from 'lucide-react-native';
 import { useWallet } from '../../context/WalletContext';
 import { colors } from '../../theme/colors';
@@ -28,13 +29,14 @@ import { formatDate } from '../../lib/date';
 import { PersonSummary, CreditDebtRecord, MessageType } from '../../types';
 import { useResponsive } from '../../lib/useResponsive';
 import { SmartMessageModal } from './SmartMessageModal';
+import { PdfReportModal } from './reports/PdfReportModal';
 
 interface PersonLedgerModalProps {
   visible: boolean;
   personSummary: PersonSummary | null;
   onClose: () => void;
   onOpenQuickAdd: (mode: 'credit' | 'debt', personName?: string, personPhone?: string) => void;
-  onOpenSettleModal?: (mode: 'receive' | 'repay') => void;
+  onOpenSettleModal?: (mode: 'receive' | 'repay', personId?: string) => void;
 }
 
 export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
@@ -69,6 +71,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
 
   // Smart Message Modal State
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [messageInitialType, setMessageInitialType] = useState<MessageType>('payment_reminder');
   const [selectedRecordForMessage, setSelectedRecordForMessage] = useState<CreditDebtRecord | null>(null);
 
@@ -224,6 +227,46 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
     }
   };
 
+  const handleRecordPaymentReceived = () => {
+    const hasReceivable =
+      (personSummary.outstandingReceivable || 0) > 0 ||
+      personRecords.some((r) => r.type === 'credit' && r.remainingAmount > 0);
+
+    if (!hasReceivable) {
+      Alert.alert(
+        'No Pending Amount',
+        `There is no pending receivable amount from ${personSummary.name} to record payment for.`
+      );
+      return;
+    }
+    onClose();
+    if (onOpenSettleModal) {
+      onOpenSettleModal('receive', personSummary.id);
+    } else {
+      onOpenQuickAdd('credit', personSummary.name, personSummary.phone);
+    }
+  };
+
+  const handleRecordRepayment = () => {
+    const hasPayable =
+      (personSummary.outstandingPayable || 0) > 0 ||
+      personRecords.some((r) => r.type === 'debt' && r.remainingAmount > 0);
+
+    if (!hasPayable) {
+      Alert.alert(
+        'No Pending Amount',
+        `There is no pending payable amount to repay to ${personSummary.name}.`
+      );
+      return;
+    }
+    onClose();
+    if (onOpenSettleModal) {
+      onOpenSettleModal('repay', personSummary.id);
+    } else {
+      onOpenQuickAdd('debt', personSummary.name, personSummary.phone);
+    }
+  };
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={[styles.backdrop, isWide && styles.backdropWide]}>
@@ -257,9 +300,19 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
               </View>
             </View>
 
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
-              <X size={20} color={colors.slate[600]} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <TouchableOpacity
+                onPress={() => setIsPdfModalOpen(true)}
+                style={styles.headerPdfBtn}
+                activeOpacity={0.7}
+              >
+                <Download size={13} color={colors.brand[600]} />
+                <Text style={styles.headerPdfBtnText}>Statement</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
+                <X size={20} color={colors.slate[600]} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView style={styles.bodyScroll} showsVerticalScrollIndicator={false}>
@@ -374,61 +427,61 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
               </View>
             </View>
 
-            {/* 2. Permanent Action Buttons (7 Actions always accessible) */}
-            <View style={styles.actionsGrid}>
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.lendBtn]}
-                onPress={() => {
-                  onClose();
-                  onOpenQuickAdd('credit', personSummary.name, personSummary.phone);
-                }}
-              >
-                <ArrowUpRight size={15} color={colors.white} />
-                <Text style={styles.actionBtnText}>Give Money</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.receiveBtn]}
-                onPress={() => {
-                  if (onOpenSettleModal) {
-                    onClose();
-                    onOpenSettleModal('receive');
-                  } else {
+            {/* 2. Primary Khata Actions: Lend, Receive, Borrow, Repay */}
+            <View style={styles.actionsContainer}>
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.lendBtn]}
+                  onPress={() => {
                     onClose();
                     onOpenQuickAdd('credit', personSummary.name, personSummary.phone);
-                  }
-                }}
-              >
-                <ArrowDownLeft size={15} color={colors.white} />
-                <Text style={styles.actionBtnText}>Receive Money</Text>
-              </TouchableOpacity>
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <ArrowUpRight size={15} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+                    Give Money (Lend)
+                  </Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.borrowBtn]}
-                onPress={() => {
-                  onClose();
-                  onOpenQuickAdd('debt', personSummary.name, personSummary.phone);
-                }}
-              >
-                <ArrowDownLeft size={15} color={colors.white} />
-                <Text style={styles.actionBtnText}>Borrow Money</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.receiveBtn]}
+                  onPress={handleRecordPaymentReceived}
+                  activeOpacity={0.8}
+                >
+                  <ArrowDownLeft size={15} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+                    Record Payment Received
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.repayBtn]}
-                onPress={() => {
-                  if (onOpenSettleModal) {
-                    onClose();
-                    onOpenSettleModal('repay');
-                  } else {
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.borrowBtn]}
+                  onPress={() => {
                     onClose();
                     onOpenQuickAdd('debt', personSummary.name, personSummary.phone);
-                  }
-                }}
-              >
-                <ArrowUpRight size={15} color={colors.white} />
-                <Text style={styles.actionBtnText}>Repay Money</Text>
-              </TouchableOpacity>
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <ArrowDownLeft size={15} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+                    Borrow Money
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.repayBtn]}
+                  onPress={handleRecordRepayment}
+                  activeOpacity={0.8}
+                >
+                  <ArrowUpRight size={15} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.actionBtnText} numberOfLines={1} adjustsFontSizeToFit>
+                    Record Repayment
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Secondary Actions: Reminders, Confirmation & Edit */}
@@ -655,7 +708,7 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                           }}
                         >
                           <Text style={styles.settleTriggerText}>
-                            {isEntryCredit ? '+ Record Payment Received' : '+ Record Payment Made'}
+                            {isEntryCredit ? '+ Record Payment Received' : '+ Record Repayment'}
                           </Text>
                         </TouchableOpacity>
                       )}
@@ -663,7 +716,9 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
                       {/* Inline Settlement Input Form */}
                       {isSettlingThis && (
                         <View style={styles.inlineSettleForm}>
-                          <Text style={styles.inlineSettleTitle}>Record Partial / Full Payment</Text>
+                          <Text style={styles.inlineSettleTitle}>
+                            {isEntryCredit ? 'Record Payment Received' : 'Record Repayment'}
+                          </Text>
                           <TextInput
                             style={styles.inlineInput}
                             placeholder="Payment Amount (₹)"
@@ -711,6 +766,16 @@ export const PersonLedgerModal: React.FC<PersonLedgerModalProps> = ({
               setSelectedRecordForMessage(null);
             }}
           />
+
+          {/* Person Khata PDF Statement Modal */}
+          {personSummary && (
+            <PdfReportModal
+              visible={isPdfModalOpen}
+              onClose={() => setIsPdfModalOpen(false)}
+              initialReportType="khata"
+              initialPersonId={personSummary.id}
+            />
+          )}
         </View>
       </View>
     </Modal>
@@ -757,6 +822,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flex: 1,
+    minWidth: 0,
+    paddingRight: 6,
   },
   avatarBox: {
     width: 42,
@@ -765,6 +832,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand[50],
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   avatarText: {
     fontSize: 15,
@@ -775,11 +843,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexWrap: 'wrap',
   },
   personName: {
     fontSize: 16,
     fontWeight: '800',
     color: colors.slate[900],
+    flexShrink: 1,
   },
   overdueBadge: {
     backgroundColor: colors.expense.bg,
@@ -796,6 +866,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.slate[400],
     marginTop: 1,
+  },
+  headerPdfBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.brand[50],
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.brand[200],
+  },
+  headerPdfBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.brand[600],
   },
   closeBtn: {
     padding: 6,
@@ -964,19 +1050,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
   },
-  actionsGrid: {
+  actionsContainer: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  actionRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 10,
   },
   actionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 12,
-    gap: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    gap: 6,
+    minHeight: 46,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   lendBtn: {
     backgroundColor: colors.receivable.solid,
@@ -992,8 +1088,9 @@ const styles = StyleSheet.create({
   },
   actionBtnText: {
     color: colors.white,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
+    letterSpacing: -0.2,
   },
   secondaryActionsRow: {
     flexDirection: 'row',

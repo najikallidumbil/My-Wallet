@@ -178,8 +178,8 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
         <View style={styles.modalCard}>
           {/* Header */}
           <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>
+            <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+              <Text style={styles.title} numberOfLines={1}>
                 {isReceive ? 'Receive Money (Payment Received)' : 'Repay Money (Debt Repaid)'}
               </Text>
               <Text style={styles.subtitle}>
@@ -188,7 +188,7 @@ export const KhataSettleModal: React.FC<KhataSettleModalProps> = ({
                   : 'Record money you paid back to someone you owe'}
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
               <X size={20} color={colors.slate[600]} />
             </TouchableOpacity>
           </View>
@@ -384,6 +384,9 @@ const styles = StyleSheet.create({
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   scrollContent: {
     maxHeight: 460,

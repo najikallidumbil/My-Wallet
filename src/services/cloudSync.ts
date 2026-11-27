@@ -14,6 +14,52 @@ import {
 } from '../types';
 import { INITIAL_CATEGORIES } from '../data/defaultData';
 
+// Legacy category ID mappings for backward and forward database compatibility
+export const LEGACY_CATEGORY_TO_STANDARD: Record<string, string> = {
+  'cat-salary': 'cat-inc-1',
+  'cat-business': 'cat-inc-2',
+  'cat-investments': 'cat-inc-3',
+  'cat-rewards': 'cat-inc-4',
+  'cat-rental': 'cat-inc-5',
+  'cat-other-income': 'cat-inc-6',
+
+  'cat-food': 'cat-exp-1',
+  'cat-groceries': 'cat-exp-2',
+  'cat-rent': 'cat-exp-3',
+  'cat-utilities': 'cat-exp-4',
+  'cat-transport': 'cat-exp-5',
+  'cat-shopping': 'cat-exp-6',
+  'cat-healthcare': 'cat-exp-7',
+  'cat-entertainment': 'cat-exp-8',
+  'cat-education': 'cat-exp-9',
+  'cat-other-expense': 'cat-exp-10',
+};
+
+export const STANDARD_CATEGORY_TO_LEGACY: Record<string, string> = {
+  'cat-inc-1': 'cat-salary',
+  'cat-inc-2': 'cat-business',
+  'cat-inc-3': 'cat-investments',
+  'cat-inc-4': 'cat-rewards',
+  'cat-inc-5': 'cat-rental',
+  'cat-inc-6': 'cat-other-income',
+
+  'cat-exp-1': 'cat-food',
+  'cat-exp-2': 'cat-groceries',
+  'cat-exp-3': 'cat-rent',
+  'cat-exp-4': 'cat-utilities',
+  'cat-exp-5': 'cat-transport',
+  'cat-exp-6': 'cat-shopping',
+  'cat-exp-7': 'cat-healthcare',
+  'cat-exp-8': 'cat-entertainment',
+  'cat-exp-9': 'cat-education',
+  'cat-exp-10': 'cat-other-expense',
+};
+
+export function normalizeCategoryId(id: string | null | undefined): string {
+  if (!id) return '';
+  return LEGACY_CATEGORY_TO_STANDARD[id] || id;
+}
+
 export interface CloudPayload {
   openingBalance: number;
   accounts: Account[];
@@ -102,10 +148,10 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       messagesRes,
     ] = await Promise.all([
       client.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
-      client.from('accounts').select('*').eq('user_id', userId),
+      client.from('accounts').select('*').or(`user_id.eq.${userId},user_id.is.null`),
       client.from('account_transfers').select('*').eq('user_id', userId),
       client.from('categories').select('*').or(`user_id.eq.${userId},user_id.is.null`),
-      client.from('subcategories').select('*').eq('user_id', userId),
+      client.from('subcategories').select('*').or(`user_id.eq.${userId},user_id.is.null`),
       client.from('budgets').select('*').eq('user_id', userId),
       client.from('khata_people').select('*').eq('user_id', userId),
       client.from('khata_transactions').select('*').eq('user_id', userId),
@@ -170,10 +216,11 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
     // Map subcategories by categoryId from Supabase
     const customSubcatsByCategory: Record<string, SubCategory[]> = {};
     (subcategoriesRes.data || []).forEach((sc: any) => {
-      if (!customSubcatsByCategory[sc.category_id]) {
-        customSubcatsByCategory[sc.category_id] = [];
+      const normalizedCatId = normalizeCategoryId(sc.category_id);
+      if (!customSubcatsByCategory[normalizedCatId]) {
+        customSubcatsByCategory[normalizedCatId] = [];
       }
-      customSubcatsByCategory[sc.category_id].push({
+      customSubcatsByCategory[normalizedCatId].push({
         id: sc.id,
         name: sc.name,
         budget: Number(sc.budget) || 0,
@@ -181,17 +228,20 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
     });
 
     // Cloud categories from DB
-    const dbCategories: Category[] = (categoriesRes.data || []).map((c: any) => ({
-      id: c.id,
-      userId: c.user_id,
-      name: c.name,
-      type: c.type,
-      icon: c.icon || 'Tag',
-      color: c.color || '#6366f1',
-      isDefault: c.is_default || false,
-      budget: Number(c.budget) || 0,
-      subcategories: customSubcatsByCategory[c.id] || [],
-    }));
+    const dbCategories: Category[] = (categoriesRes.data || []).map((c: any) => {
+      const standardId = normalizeCategoryId(c.id);
+      return {
+        id: standardId,
+        userId: c.user_id,
+        name: c.name,
+        type: c.type,
+        icon: c.icon || 'Tag',
+        color: c.color || '#6366f1',
+        isDefault: c.is_default || false,
+        budget: Number(c.budget) || 0,
+        subcategories: customSubcatsByCategory[standardId] || [],
+      };
+    });
 
     // Merge: start with INITIAL_CATEGORIES and enrich with DB custom subcategories and categories
     const categoryMap = new Map<string, Category>();
@@ -292,7 +342,7 @@ export async function fetchUserDataFromCloud(userId: string): Promise<CloudFetch
       userId: t.user_id,
       amount: Number(t.amount) || 0,
       type: t.type,
-      categoryId: t.category_id || '',
+      categoryId: normalizeCategoryId(t.category_id) || '',
       subcategoryId: t.subcategory_id || undefined,
       subcategoryName: t.subcategory_name || undefined,
       accountId: t.account_id || undefined,
@@ -393,9 +443,10 @@ export async function syncAllDataToCloud(
     logDbOperation('user_settings', 'upsert', userId, true);
     syncedCount++;
 
-    // 2. Accounts
-    if (payload.accounts.length > 0) {
-      const rows = payload.accounts.map((a) => ({
+    // 2. Custom Accounts (system default accounts acc-cash, acc-bank, acc-upi are seeded globally)
+    const customAccounts = payload.accounts.filter((a) => !a.isDefault);
+    if (customAccounts.length > 0) {
+      const rows = customAccounts.map((a) => ({
         id: a.id,
         user_id: userId,
         name: a.name,
@@ -405,7 +456,7 @@ export async function syncAllDataToCloud(
         account_number: a.accountNumber || null,
         color: a.color || null,
         icon: a.icon || null,
-        is_default: a.isDefault || false,
+        is_default: false,
       }));
       const { error: accErr } = await client.from('accounts').upsert(rows, { onConflict: 'id' });
       if (accErr) {
@@ -457,6 +508,32 @@ export async function syncAllDataToCloud(
       }
       logDbOperation('categories', 'upsert', userId, true);
       syncedCount += rows.length;
+    }
+
+    // 4b. Custom Subcategories
+    const customSubcategories: { id: string; user_id: string; category_id: string; name: string; budget: number }[] = [];
+    payload.categories.forEach((cat) => {
+      (cat.subcategories || []).forEach((sub) => {
+        // Only sync user-created subcategories (ignore default system sub-1 to sub-20)
+        if (!/^sub-([1-9]|1[0-9]|20)$/.test(sub.id)) {
+          customSubcategories.push({
+            id: sub.id,
+            user_id: userId,
+            category_id: cat.id,
+            name: sub.name.trim(),
+            budget: sub.budget || 0,
+          });
+        }
+      });
+    });
+    if (customSubcategories.length > 0) {
+      const { error: subErr } = await client.from('subcategories').upsert(customSubcategories, { onConflict: 'id' });
+      if (subErr) {
+        logDbOperation('subcategories', 'upsert', userId, false, subErr);
+      } else {
+        logDbOperation('subcategories', 'upsert', userId, true);
+        syncedCount += customSubcategories.length;
+      }
     }
 
     // 5. Khata People
@@ -756,12 +833,56 @@ export async function cloudSaveTransaction(
       attachments: (tx.attachments || []) as any,
     };
 
-    const { error } = await client.from('transactions').upsert(row, { onConflict: 'id' });
+    let { error } = await client.from('transactions').upsert(row, { onConflict: 'id' });
+
+    // Fallback 1: If category foreign key failed, attempt legacy alias
+    if (error && error.code === '23503' && error.message?.includes('transactions_category_id_fkey') && tx.categoryId) {
+      const legacyId = STANDARD_CATEGORY_TO_LEGACY[tx.categoryId] || LEGACY_CATEGORY_TO_STANDARD[tx.categoryId];
+      if (legacyId && legacyId !== tx.categoryId) {
+        const retryRow = { ...row, category_id: legacyId };
+        const retryRes = await client.from('transactions').upsert(retryRow, { onConflict: 'id' });
+        if (!retryRes.error) {
+          logDbOperation('transactions', 'upsert', userId, true);
+          return { success: true, data: tx };
+        }
+      }
+    }
+
+    // Fallback 2: If subcategory foreign key failed, save with subcategory_id = null while preserving subcategory_name
+    if (error && error.code === '23503' && error.message?.includes('transactions_subcategory_id_fkey') && row.subcategory_id) {
+      const retryRow = { ...row, subcategory_id: null };
+      const retryRes = await client.from('transactions').upsert(retryRow, { onConflict: 'id' });
+      if (!retryRes.error) {
+        logDbOperation('transactions', 'upsert', userId, true);
+        return { success: true, data: tx };
+      }
+    }
+
+    // Fallback 3: If account foreign key failed, save with account_id = null so transaction is preserved
+    if (error && error.code === '23503' && error.message?.includes('transactions_account_id_fkey') && row.account_id) {
+      const retryRow = { ...row, account_id: null };
+      const retryRes = await client.from('transactions').upsert(retryRow, { onConflict: 'id' });
+      if (!retryRes.error) {
+        logDbOperation('transactions', 'upsert', userId, true);
+        return { success: true, data: tx };
+      }
+    }
+
     if (error) {
       logDbOperation('transactions', 'upsert', userId, false, error);
+      let userMessage = error.message;
+      if (error.code === '23503') {
+        if (error.message?.includes('transactions_category_id_fkey')) {
+          userMessage = `Database Error: Category "${tx.categoryId}" was not recognized by Supabase. Please run the SQL migration script in Supabase SQL Editor.`;
+        } else if (error.message?.includes('transactions_subcategory_id_fkey')) {
+          userMessage = `Database Error: Subcategory was not recognized by Supabase. Please run the SQL migration script in Supabase SQL Editor.`;
+        } else if (error.message?.includes('transactions_account_id_fkey')) {
+          userMessage = `Database Error: Account "${tx.accountId}" was not recognized by Supabase. Please run the SQL migration script in Supabase SQL Editor.`;
+        }
+      }
       return {
         success: false,
-        error: { table: 'transactions', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+        error: { table: 'transactions', operation: 'upsert', code: error.code, message: userMessage, details: error.details },
       };
     }
 
@@ -1317,12 +1438,30 @@ export async function cloudSaveSubcategory(
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await client.from('subcategories').upsert(row, { onConflict: 'id' });
+    let { error } = await client.from('subcategories').upsert(row, { onConflict: 'id' });
+
+    // Fallback: If parent category foreign key failed, attempt legacy alias
+    if (error && error.code === '23503' && error.message?.includes('subcategories_category_id_fkey')) {
+      const legacyId = STANDARD_CATEGORY_TO_LEGACY[categoryId] || LEGACY_CATEGORY_TO_STANDARD[categoryId];
+      if (legacyId && legacyId !== categoryId) {
+        const retryRow = { ...row, category_id: legacyId };
+        const retryRes = await client.from('subcategories').upsert(retryRow, { onConflict: 'id' });
+        if (!retryRes.error) {
+          logDbOperation('subcategories', 'upsert', userId, true);
+          return { success: true, data: subcategory };
+        }
+      }
+    }
+
     if (error) {
       logDbOperation('subcategories', 'upsert', userId, false, error);
+      let userMessage = error.message;
+      if (error.code === '23503') {
+        userMessage = `Database Error: Parent category "${categoryId}" was not recognized by Supabase. Please run the SQL migration script in Supabase SQL Editor.`;
+      }
       return {
         success: false,
-        error: { table: 'subcategories', operation: 'upsert', code: error.code, message: error.message, details: error.details },
+        error: { table: 'subcategories', operation: 'upsert', code: error.code, message: userMessage, details: error.details },
       };
     }
 

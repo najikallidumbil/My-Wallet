@@ -1,10 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Wallet, Settings as SettingsIcon, Cloud } from 'lucide-react-native';
+import { Wallet, Settings as SettingsIcon } from 'lucide-react-native';
 import { colors } from '../../theme/colors';
 import { AppMode } from '../../types';
-import { useAuth } from '../../context/AuthContext';
-import { useWallet } from '../../context/WalletContext';
 
 interface HeaderProps {
   currentMode: AppMode;
@@ -12,25 +10,17 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ currentMode, onOpenSettings }) => {
-  const { user } = useAuth();
-  const { syncState } = useWallet();
-
   const getModeLabel = () => {
     switch (currentMode) {
       case 'income_expense':
         return 'Finance • Income & Expense';
       case 'khata_book':
-        return 'Khata Book • Lending & Borrowing';
+        return 'Khata Book • Lending & Budgeting';
       case 'financial_overview':
         return 'Overview • Combined Analytics';
       default:
-        return 'Finance Management';
+        return 'Khata Book • Lending & Budgeting';
     }
-  };
-
-  const getInitials = () => {
-    if (!user?.email) return 'MW';
-    return user.email.substring(0, 2).toUpperCase();
   };
 
   return (
@@ -41,32 +31,17 @@ export const Header: React.FC<HeaderProps> = ({ currentMode, onOpenSettings }) =
         </View>
         <View style={styles.titleCol}>
           <Text style={styles.title} numberOfLines={1}>MY WALLET</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>{getModeLabel()}</Text>
+          {/* Subtitle is fully visible and readable without truncation or ellipsis */}
+          <Text style={styles.subtitle}>{getModeLabel()}</Text>
         </View>
       </View>
 
       <View style={styles.right}>
-        {user ? (
-          <TouchableOpacity
-            style={styles.userBadge}
-            onPress={onOpenSettings}
-            accessibilityLabel="User Profile"
-          >
-            <View style={styles.avatarMini}>
-              <Text style={styles.avatarMiniText}>{getInitials()}</Text>
-            </View>
-            {syncState === 'synced' ? (
-              <Cloud size={14} color={colors.income.text} />
-            ) : (
-              <Cloud size={14} color={colors.warning.text} />
-            )}
-          </TouchableOpacity>
-        ) : null}
-
         <TouchableOpacity
           style={styles.settingsBtn}
           onPress={onOpenSettings}
           accessibilityLabel="Open Settings"
+          activeOpacity={0.7}
         >
           <SettingsIcon size={20} color={colors.slate[600]} />
         </TouchableOpacity>
@@ -75,27 +50,30 @@ export const Header: React.FC<HeaderProps> = ({ currentMode, onOpenSettings }) =
   );
 };
 
-
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
     backgroundColor: colors.white,
     borderBottomWidth: 1,
     borderBottomColor: colors.slate[200],
+    minHeight: 58,
   },
   left: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     flex: 1,
-    marginRight: 8,
+    minWidth: 0,
+    marginRight: 10,
   },
   titleCol: {
     flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
   },
   iconCircle: {
     width: 38,
@@ -104,6 +82,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand[600],
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   title: {
     fontSize: 16,
@@ -113,9 +92,15 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 11,
+    lineHeight: 15,
     fontWeight: '600',
     color: colors.slate[500],
     marginTop: 1,
+  },
+  right: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   settingsBtn: {
     width: 40,
@@ -124,32 +109,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.slate[100],
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  right: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  userBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    backgroundColor: colors.slate[100],
-    borderRadius: 12,
-  },
-  avatarMini: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.brand[600],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarMiniText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: colors.white,
   },
 });

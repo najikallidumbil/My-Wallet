@@ -78,7 +78,7 @@ export const MonthlyTrendsBarChart: React.FC<MonthlyTrendsBarChartProps> = ({
     <View style={styles.card} onLayout={onLayout}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerTitleArea}>
           <View style={styles.titleRow}>
             <Text style={styles.title}>Monthly Trends</Text>
             <View style={styles.badge}>
@@ -349,13 +349,20 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: 10,
+  },
+  headerTitleArea: {
+    flex: 1,
+    minWidth: 160,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   title: {
     fontSize: 15,
@@ -385,6 +392,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 2,
     gap: 2,
+    alignSelf: 'flex-start',
   },
   pill: {
     paddingHorizontal: 8,
@@ -413,6 +421,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     marginBottom: 10,
+    flexWrap: 'wrap',
   },
   legendItem: {
     flexDirection: 'row',
@@ -449,6 +458,8 @@ const styles = StyleSheet.create({
   tooltipValues: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   tooltipValBox: {
     alignItems: 'flex-start',

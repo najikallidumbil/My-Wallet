@@ -173,9 +173,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: colors.slate[900],
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
   },
   closeBtn: {
     padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.slate[100],
+    flexShrink: 0,
   },
   summaryBox: {
     flexDirection: 'row',
